@@ -41,11 +41,18 @@ h2, h5 { color: #8b949e !important; }
 
 # SESIÓN DE STREAMLIT
 defaults = {
-    "lineal":         None,
-    "longitud_campo": 800,
-    "running":        False,
-    "finished":       False,
-    "paused":         False,
+    "lineal":          None,
+    "longitud_campo":  800,
+    "running":         False,
+    "finished":        False,
+    "paused":          False,
+    # datos acumulados durante la simulacion
+    "log":             [],     # eventos: {t, tipo, msg}
+    "historial":       [],     # filas para CSV: {tiempo_s, pos, torres...}
+    "gps_track":       [],     # últimas lecturas GPS para la mini-tabla
+    "vel_real":        0.0,    # velocidad media real calculada entre frames
+    "pos_prev":        0.0,    # posicion_norte del frame anterior
+    "tramos_ok_prev":  None,   # estado de alineacion anterior para detectar cambios
 }
 for k, v in defaults.items():
     if k not in st.session_state:
@@ -141,6 +148,7 @@ with st.sidebar:
                 velocidad_nominal    = v_nom,
             )
             state.lineal.start()
+            state.log.append({"t": "00h 00m 00s", "tipo": "START", "msg": "Sistema iniciado"})
             if st.session_state.get("k_gps_on", False):
                 puerto = st.session_state.get("k_gps_puerto", "").strip()
                 state.lineal.asignar_gps(
@@ -158,6 +166,8 @@ with st.sidebar:
     elif state.running:
         if st.button("STOP / PAUSAR", key="btn_stop", width="stretch"):
             state.lineal.stop()
+            state.log.append({"t": state.lineal._tiempo_formateado(), "tipo": "STOP",
+                               "msg": f"Sistema pausado en {state.lineal.posicion_norte:.2f} m"})
             state.running = False
             state.paused  = True
             st.rerun()
@@ -166,6 +176,8 @@ with st.sidebar:
         bc1, bc2 = st.columns(2)
         if bc1.button("START / CONTINUAR", key="btn_start", type="primary", width="stretch"):
             state.lineal.start()
+            state.log.append({"t": state.lineal._tiempo_formateado(), "tipo": "START",
+                               "msg": f"Sistema reanudado desde {state.lineal.posicion_norte:.2f} m"})
             state.running = True
             state.paused  = False
             st.rerun()
@@ -499,9 +511,61 @@ def panel_principal():
 
     # Avance de simulacion
     if state.running and not state.finished and lineal is not None:
-        lineal.avanza(state.get("k_simspd", 60))
+        sim_spd_val = state.get("k_simspd", 60)
+        lineal.avanza(sim_spd_val)
+
+        # Velocidad real (m/min) entre este frame y el anterior
+        state.vel_real = (lineal.posicion_norte - state.pos_prev) / (sim_spd_val / 60.0)
+        state.pos_prev = lineal.posicion_norte
+
+        # Fila para CSV
+        fila = {
+            "tiempo_s":        lineal.tiempo_total_segundos,
+            "tiempo":          lineal._tiempo_formateado(),
+            "posicion_norte":  round(lineal.posicion_norte, 3),
+            "alineado":        lineal.esta_alineado,
+        }
+        for j, t in enumerate(lineal.torres):
+            fila[f"torre_{j}_y"] = round(t.posicion_y, 3)
+        if lineal.gps:
+            fila["lat_e7"] = lineal.gps.lat_e7
+            fila["lon_e7"] = lineal.gps.lon_e7
+        state.historial.append(fila)
+
+        # GPS track (últimas 20 lecturas)
+        if lineal.gps:
+            state.gps_track.append({
+                "Tiempo":    lineal._tiempo_formateado(),
+                "LAT ×10⁷": lineal.gps.lat_e7,
+                "LON ×10⁷": lineal.gps.lon_e7,
+                "Lat (°)":   round(lineal.gps.latitud, 7),
+                "Lon (°)":   round(lineal.gps.longitud, 7),
+            })
+            if len(state.gps_track) > 20:
+                state.gps_track = state.gps_track[-20:]
+
+        # Log: detectar cambios de alineacion en tramos
+        tramos_ok = [t.esta_alineado for t in lineal.tramos]
+        if state.tramos_ok_prev is not None:
+            for j, (prev, curr) in enumerate(zip(state.tramos_ok_prev, tramos_ok)):
+                if prev and not curr:
+                    state.log.append({
+                        "t":    lineal._tiempo_formateado(),
+                        "tipo": "CRIT",
+                        "msg":  f"Tramo {j+1} desalineado  ({lineal.tramos[j].desviacion_norte:+.3f} m)",
+                    })
+                elif not prev and curr:
+                    state.log.append({
+                        "t":    lineal._tiempo_formateado(),
+                        "tipo": "OK",
+                        "msg":  f"Tramo {j+1} recuperado",
+                    })
+        state.tramos_ok_prev = tramos_ok
+
         if lineal.posicion_norte >= longitud_campo:
             lineal.stop()
+            state.log.append({"t": lineal._tiempo_formateado(), "tipo": "FIN",
+                               "msg": f"Riego completado — {lineal.posicion_norte:.2f} m en {lineal._tiempo_formateado()}"})
             state.running  = False
             state.finished = True
             st.rerun()
@@ -562,9 +626,12 @@ def panel_principal():
         )
 
     # METRICAS
-    cols_m = st.columns(7)
+    cols_m = st.columns(8)
     if lineal:
-        porcentaje = min(lineal.posicion_norte / longitud_campo * 100.0, 100.0)
+        porcentaje  = min(lineal.posicion_norte / longitud_campo * 100.0, 100.0)
+        vel_teorica = lineal.velocidad_nominal * lineal.velocidad_porcentaje / 100.0
+        vel_real    = state.get("vel_real", 0.0)
+        delta_vel   = vel_real - vel_teorica
         cols_m[0].metric("Tiempo campo",   lineal._tiempo_formateado())
         cols_m[1].metric("Ciclo",          str(lineal.ciclo_actual))
         cols_m[2].metric("Posicion media", f"{lineal.posicion_norte:.2f} m")
@@ -572,6 +639,9 @@ def panel_principal():
         cols_m[4].metric("Alineacion",     "OK" if lineal.esta_alineado else "Corrigiendo")
         cols_m[5].metric("Guia Izq",       "ON" if lineal.guia_izquierda.contactor.esta_cerrado else "OFF")
         cols_m[6].metric("Guia Der",       "ON" if lineal.guia_derecha.contactor.esta_cerrado else "OFF")
+        cols_m[7].metric("Vel. real",      f"{vel_real:.2f} m/min",
+                          delta=f"{delta_vel:+.2f} vs teórica",
+                          delta_color="normal")
     else:
         for col in cols_m:
             col.metric("—", "—")
@@ -612,6 +682,15 @@ def panel_principal():
         cg[1].metric("Latitud",      f"{gps.latitud:.7f}°")
         cg[2].metric("Longitud",     f"{gps.longitud:.7f}°")
         cg[3].metric("Formato ×10⁷", f"{gps.lat_e7}  /  {gps.lon_e7}")
+
+    # MINI-TABLA GPS TRACK (últimas 10 lecturas)
+    if state.gps_track:
+        with st.expander(f"Track GPS — últimas {min(len(state.gps_track), 10)} lecturas", expanded=False):
+            st.dataframe(
+                state.gps_track[-10:][::-1],
+                hide_index=True,
+                width="stretch",
+            )
 
     # FIGURA
     st.plotly_chart(
@@ -693,6 +772,43 @@ def panel_principal():
                     f"font-weight:600'>{estado}</div>"
                     f"</div>",
                     unsafe_allow_html=True,
+                )
+
+        # LOG DE EVENTOS + EXPORTAR CSV
+        st.divider()
+        col_log, col_csv = st.columns([3, 1])
+
+        with col_log:
+            _TIPO_COLOR = {
+                "START": "#3fb950", "STOP": "#e3b341", "FIN": "#3fb950",
+                "CRIT":  "#f85149", "OK":   "#58a6ff", "INFO": "#8b949e",
+            }
+            entradas = state.log[-60:][::-1]   # últimas 60, más reciente arriba
+            with st.expander(f"Log de eventos  ({len(state.log)} entradas)", expanded=False):
+                for e in entradas:
+                    c = _TIPO_COLOR.get(e["tipo"], "#8b949e")
+                    st.markdown(
+                        f"<code style='color:#484f58;font-size:0.75rem'>{e['t']}</code>&nbsp;"
+                        f"<span style='background:{c}22;color:{c};border-radius:4px;"
+                        f"padding:1px 7px;font-size:0.68rem;font-family:monospace;"
+                        f"font-weight:700'>{e['tipo']}</span>&nbsp;"
+                        f"<span style='color:#e6edf3;font-size:0.82rem'>{e['msg']}</span>",
+                        unsafe_allow_html=True,
+                    )
+
+        with col_csv:
+            if state.historial:
+                import csv, io
+                buf = io.StringIO()
+                writer = csv.DictWriter(buf, fieldnames=list(state.historial[0].keys()))
+                writer.writeheader()
+                writer.writerows(state.historial)
+                st.download_button(
+                    label="Descargar CSV",
+                    data=buf.getvalue(),
+                    file_name="simulacion_lineal.csv",
+                    mime="text/csv",
+                    width="stretch",
                 )
 
 

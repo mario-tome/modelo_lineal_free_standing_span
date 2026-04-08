@@ -39,10 +39,11 @@ lineal = Lineal(
 )
 
 lineal.asignar_gps(
-    indice_torre  = INDICE_TORRE_GPS,
-    lat_origen    = LAT_ORIGEN,
-    lon_origen    = LON_ORIGEN,
-    puerto_serial = PUERTO_SERIAL_GPS,
+    indice_torre     = INDICE_TORRE_GPS,
+    lat_origen       = LAT_ORIGEN,
+    lon_origen       = LON_ORIGEN,
+    puerto_serial    = PUERTO_SERIAL_GPS,
+    verbose_consola  = True,   # muestra coordenadas en consola (solo en script CLI)
 )
 
 vel_media = lineal.velocidad_nominal * lineal.velocidad_porcentaje / 100.0
