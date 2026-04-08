@@ -482,43 +482,22 @@ def build_figure(lineal: Lineal | None, longitud_campo: float) -> go.Figure:
             hovertemplate=hover,
             showlegend=False))
 
-        # Callout siempre visible.
-        # FIX: Plotly no renderiza <font color="..."> en anotaciones SVG.
-        # Se usan dos anotaciones separadas: una para label+Y (color neutro)
-        # y otra para el estado (con su color propio via font=dict(color=...)).
-        ay_off = -72 if i % 2 == 0 else 72
-
-        # Anotacion principal: label y posicion
+        # Callout siempre visible — una sola anotacion, texto plano multilínea.
+        # Plotly SVG no renderiza <font color> pero sí respeta \n con align.
+        # El color de la caja (bordercolor) ya da pista visual del estado.
+        ay_off = -68 if i % 2 == 0 else 68
         annotations.append(dict(
             x=torre.posicion_x, y=torre.posicion_y,
             xref="x", yref="y",
-            text=f"<b>{label}</b>  Y={torre.posicion_y:.2f} m",
+            text=f"<b>{label}</b>  Y={torre.posicion_y:.2f} m<br>{estado_txt}",
             showarrow=True,
             arrowhead=2, arrowwidth=1.5, arrowsize=0.7,
             arrowcolor=color,
             ax=0, ay=ay_off,
-            font=dict(color="#c9d1d9", size=10, family="monospace"),
+            font=dict(color=estado_color, size=10, family="monospace"),
             bgcolor="rgba(22,27,34,0.92)",
-            bordercolor=color, borderwidth=1, borderpad=5,
-            align="left",
-        ))
-
-        # Anotacion secundaria: estado con color propio, desplazada
-        # para quedar debajo/arriba de la principal
-        ay_estado = ay_off + (18 if ay_off > 0 else -18)
-        annotations.append(dict(
-            x=torre.posicion_x, y=torre.posicion_y,
-            xref="x", yref="y",
-            text=estado_txt,
-            showarrow=False,
-            ax=0, ay=ay_estado,
-            font=dict(color=estado_color, size=9, family="monospace"),
-            bgcolor="rgba(22,27,34,0.0)",   # transparente, sin borde
-            borderwidth=0,
+            bordercolor=estado_color, borderwidth=1, borderpad=6,
             align="center",
-            # Desplazamos pixel a pixel usando xshift/yshift
-            xshift=0,
-            yshift=ay_off + (28 if ay_off > 0 else -28),
         ))
 
     pad_x = fw * 0.06
