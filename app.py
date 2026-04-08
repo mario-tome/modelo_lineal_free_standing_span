@@ -227,7 +227,7 @@ else:
         "<span style='width:8px;height:8px;border-radius:50%;background:#484f58;"
         "display:inline-block'></span>"
         "<span style='color:#8b949e;letter-spacing:1px;font-size:0.85rem'>"
-        "Configura el lineal y pulsa INICIAR</span>"
+        "Configura el lineal en el panel izquierdo y pulsa INICIAR</span>"
         "</div>",
         unsafe_allow_html=True,
     )
@@ -406,7 +406,7 @@ def build_figure(lineal: Lineal | None, longitud_campo: float) -> go.Figure:
             mx, my = (x1 + x2) / 2, (y1 + y2) / 2
             annotations.append(dict(
                 x=mx, y=my,
-                text=f"<b>{ang:+.2f}°</b>",
+                text=f"{ang:+.2f}°",
                 showarrow=False,
                 font=dict(color="#ffa657", size=13, family="monospace"),
                 bgcolor="rgba(13,17,23,0.75)",
@@ -457,7 +457,7 @@ def build_figure(lineal: Lineal | None, longitud_campo: float) -> go.Figure:
         # Borde activo (verde) o inactivo (gris)
         borde_color = "#3fb950" if cont_cerrado else "#484f58"
 
-        # Estado semantico para el callout
+        # Estado semantico para el callout — FIX: sin etiquetas <font>, color va en font=dict()
         if isinstance(torre, Torre_Guia):
             estado_txt   = f"DC {torre.contactor.duty_cycle*100:.0f}%  {'ON' if cont_cerrado else 'OFF'}"
             estado_color = color
@@ -482,16 +482,17 @@ def build_figure(lineal: Lineal | None, longitud_campo: float) -> go.Figure:
             hovertemplate=hover,
             showlegend=False))
 
-        # Callout siempre visible — alterna arriba/abajo para evitar solapamientos
+        # Callout siempre visible.
+        # FIX: Plotly no renderiza <font color="..."> en anotaciones SVG.
+        # Se usan dos anotaciones separadas: una para label+Y (color neutro)
+        # y otra para el estado (con su color propio via font=dict(color=...)).
         ay_off = -72 if i % 2 == 0 else 72
+
+        # Anotacion principal: label y posicion
         annotations.append(dict(
             x=torre.posicion_x, y=torre.posicion_y,
             xref="x", yref="y",
-            text=(
-                f"<b>{label}</b><br>"
-                f"Y = {torre.posicion_y:.2f} m<br>"
-                f"<font color='{estado_color}'>{estado_txt}</font>"
-            ),
+            text=f"<b>{label}</b>  Y={torre.posicion_y:.2f} m",
             showarrow=True,
             arrowhead=2, arrowwidth=1.5, arrowsize=0.7,
             arrowcolor=color,
@@ -500,6 +501,24 @@ def build_figure(lineal: Lineal | None, longitud_campo: float) -> go.Figure:
             bgcolor="rgba(22,27,34,0.92)",
             bordercolor=color, borderwidth=1, borderpad=5,
             align="left",
+        ))
+
+        # Anotacion secundaria: estado con color propio, desplazada
+        # para quedar debajo/arriba de la principal
+        ay_estado = ay_off + (18 if ay_off > 0 else -18)
+        annotations.append(dict(
+            x=torre.posicion_x, y=torre.posicion_y,
+            xref="x", yref="y",
+            text=estado_txt,
+            showarrow=False,
+            ax=0, ay=ay_estado,
+            font=dict(color=estado_color, size=9, family="monospace"),
+            bgcolor="rgba(22,27,34,0.0)",   # transparente, sin borde
+            borderwidth=0,
+            align="center",
+            # Desplazamos pixel a pixel usando xshift/yshift
+            xshift=0,
+            yshift=ay_off + (28 if ay_off > 0 else -28),
         ))
 
     pad_x = fw * 0.06
@@ -611,6 +630,8 @@ if lineal:
 
 
 # BUCLE DE ANIMACION
+# FIX: capturamos excepciones de WebSocket/conexion cerrada para evitar
+# el "Task exception was never retrieved" / WebSocketClosedError en consola.
 if state.running and not state.finished:
     lineal.avanza(sim_spd)
 
@@ -618,7 +639,13 @@ if state.running and not state.finished:
         lineal.stop()
         state.running  = False
         state.finished = True
-        st.rerun()
+        try:
+            st.rerun()
+        except Exception:
+            pass
     else:
         time.sleep(0.08)
-        st.rerun()
+        try:
+            st.rerun()
+        except Exception:
+            pass
