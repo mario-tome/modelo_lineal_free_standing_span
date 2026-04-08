@@ -33,9 +33,9 @@ div.stButton > button[kind="primary"] {
 }
 div.stButton > button[kind="primary"]:hover { background-color: #1f5a3d !important; }
 hr  { border-color: #21262d !important; }
-.stProgress > div > div { background-color: #3fb950; }
 h1  { color: #e6edf3 !important; letter-spacing: 1px; }
 h2, h5 { color: #8b949e !important; }
+[data-testid="stSidebar"] .stCaption p { color: #484f58 !important; font-size: 0.72rem !important; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -62,24 +62,49 @@ with st.sidebar:
     state  = st.session_state
     locked = state.lineal is not None   # config bloqueada mientras existe un lineal
 
-    st.markdown("##### Configuracion del Lineal")
+    # --- Geometria ---
+    st.markdown("##### Geometria del Lineal")
+    if locked:
+        st.markdown(
+            "<span style='color:#484f58;font-size:0.72rem'>"
+            "Simulacion activa — parametros bloqueados</span>",
+            unsafe_allow_html=True,
+        )
     c1, c2 = st.columns(2)
-    tramos = c1.number_input("Tramos",          3,   20,   5,   1,   disabled=locked, key="k_tramos")
-    t_len  = c2.number_input("Long. tramo (m)", 5,   500,  50,  5,   disabled=locked, key="k_tlen")
+    tramos = c1.number_input("N° de tramos",      3,   20,   5,   1,   disabled=locked, key="k_tramos")
+    t_len  = c2.number_input("Long. tramo (m)",   5,   500,  50,  5,   disabled=locked, key="k_tlen")
     c3, c4 = st.columns(2)
-    v_nom  = c3.number_input("Vel. nom (m/min)", 0.5, 10.0, 3.0, 0.5, disabled=locked, key="k_vnom")
-    campo  = c4.number_input("Campo (m)",        100, 5000, 800, 50,  disabled=locked, key="k_campo")
+    v_nom  = c3.number_input("Vel. nominal (m/min)", 0.5, 10.0, 3.0, 0.5, disabled=locked, key="k_vnom")
+    campo  = c4.number_input("Campo total (m)",   100, 5000, 800, 50,  disabled=locked, key="k_campo")
 
-    st.markdown("##### Duty cycle — Torres Guia")
-    vel_pct = st.slider("% ON por ciclo de 60 s", 1, 100, 50, key="k_vpct", format="%d %%")
-    st.caption(
-        f"Motor ON **{vel_pct * 60 / 100:.0f} s** de cada 60 s  →  "
-        f"**{vel_pct / 100 * v_nom:.2f} m/min** media"
+    # --- Duty cycle ---
+    st.markdown("##### Torres Guia")
+    vel_pct = st.slider(
+        "Duty cycle  (% ON por ciclo de 60 s)",
+        1, 100, 50, key="k_vpct", format="%d %%",
+        help="Porcentaje del ciclo de 60 s en que el motor de las guias esta encendido. Determina la velocidad media de avance del lineal.",
+    )
+    v_media = vel_pct / 100 * v_nom
+    st.markdown(
+        f"<div style='background:#161b22;border:1px solid #30363d;border-radius:8px;"
+        f"padding:8px 12px;margin:2px 0 10px 0;display:flex;justify-content:space-between'>"
+        f"<span><span style='color:#8b949e;font-size:0.7rem'>ON </span>"
+        f"<b style='color:#e6edf3;font-family:monospace'>{vel_pct * 60 / 100:.0f} s</b>"
+        f"<span style='color:#8b949e;font-size:0.7rem'> / 60 s</span></span>"
+        f"<span><span style='color:#8b949e;font-size:0.7rem'>MEDIA </span>"
+        f"<b style='color:#3fb950;font-family:monospace'>{v_media:.2f} m/min</b></span>"
+        f"</div>",
+        unsafe_allow_html=True,
     )
 
-    st.markdown("##### Velocidad de simulacion")
-    sim_spd = st.slider("Segundos por refresco", 1, 600, 60, key="k_simspd")
-    st.caption(f"Cada refresco visual = **{sim_spd} s** simulados")
+    # --- Simulacion ---
+    st.markdown("##### Simulacion")
+    sim_spd = st.slider(
+        "Segundos simulados por refresco",
+        1, 600, 60, key="k_simspd",
+        help="Cuantos segundos de simulacion avanza el modelo entre cada refresco de pantalla.",
+    )
+    st.caption(f"Cada refresco = **{sim_spd} s** simulados  ({sim_spd / 60:.1f} min)")
 
     st.divider()
 
@@ -157,25 +182,53 @@ if lineal is not None:
 st.markdown("# Modelo Digital — Lineal Free Standing Span")
 
 if state.finished:
-    st.success(
-        f"Riego completado.  "
-        f"Tiempo: **{lineal._tiempo_formateado()}**  ·  "
-        f"Ciclos: **{lineal.ciclo_actual}**  ·  "
-        f"Distancia: **{lineal.posicion_norte:.1f} m**"
+    st.markdown(
+        f"<div style='display:inline-flex;align-items:center;gap:10px;"
+        f"background:rgba(63,185,80,0.08);border:1px solid rgba(63,185,80,0.25);"
+        f"border-radius:20px;padding:6px 16px;margin:4px 0'>"
+        f"<span style='color:#3fb950;font-size:1rem'>✓</span>"
+        f"<span style='color:#3fb950;font-weight:600;letter-spacing:1px;font-size:0.85rem'>RIEGO COMPLETADO</span>"
+        f"<span style='color:#8b949e;font-size:0.8rem'>·</span>"
+        f"<span style='color:#8b949e;font-size:0.8rem'>{lineal._tiempo_formateado()}</span>"
+        f"<span style='color:#8b949e;font-size:0.8rem'>·</span>"
+        f"<span style='color:#8b949e;font-size:0.8rem'>{lineal.ciclo_actual} ciclos</span>"
+        f"<span style='color:#8b949e;font-size:0.8rem'>·</span>"
+        f"<span style='color:#8b949e;font-size:0.8rem'>{lineal.posicion_norte:.1f} m</span>"
+        f"</div>",
+        unsafe_allow_html=True,
     )
 elif state.running:
     st.markdown(
-        "<span style='color:#3fb950;font-weight:600;letter-spacing:2px'>● EN MARCHA</span>",
+        "<div style='display:inline-flex;align-items:center;gap:8px;"
+        "background:rgba(63,185,80,0.08);border:1px solid rgba(63,185,80,0.25);"
+        "border-radius:20px;padding:5px 14px;margin:4px 0'>"
+        "<span style='width:8px;height:8px;border-radius:50%;background:#3fb950;"
+        "display:inline-block;box-shadow:0 0 6px #3fb950'></span>"
+        "<span style='color:#3fb950;font-weight:600;letter-spacing:2px;font-size:0.85rem'>EN MARCHA</span>"
+        "</div>",
         unsafe_allow_html=True,
     )
 elif state.paused:
     st.markdown(
-        "<span style='color:#e3b341;font-weight:600;letter-spacing:2px'>|| PAUSADO</span>",
+        "<div style='display:inline-flex;align-items:center;gap:8px;"
+        "background:rgba(227,179,65,0.08);border:1px solid rgba(227,179,65,0.25);"
+        "border-radius:20px;padding:5px 14px;margin:4px 0'>"
+        "<span style='width:8px;height:8px;border-radius:50%;background:#e3b341;"
+        "display:inline-block'></span>"
+        "<span style='color:#e3b341;font-weight:600;letter-spacing:2px;font-size:0.85rem'>PAUSADO</span>"
+        "</div>",
         unsafe_allow_html=True,
     )
 else:
     st.markdown(
-        "<span style='color:#8b949e;letter-spacing:1px'>Configura el lineal y pulsa INICIAR</span>",
+        "<div style='display:inline-flex;align-items:center;gap:8px;"
+        "background:rgba(139,148,158,0.06);border:1px solid #21262d;"
+        "border-radius:20px;padding:5px 14px;margin:4px 0'>"
+        "<span style='width:8px;height:8px;border-radius:50%;background:#484f58;"
+        "display:inline-block'></span>"
+        "<span style='color:#8b949e;letter-spacing:1px;font-size:0.85rem'>"
+        "Configura el lineal en el panel izquierdo y pulsa INICIAR</span>"
+        "</div>",
         unsafe_allow_html=True,
     )
 
@@ -196,9 +249,29 @@ else:
         col.metric("—", "—")
 
 if lineal:
-    st.progress(
-        porcentaje / 100.0,
-        text=f"**{lineal.posicion_norte:.1f} m** de **{longitud_campo:.0f} m**  ({porcentaje:.1f} %)",
+    st.markdown(
+        f"<div style='background:#161b22;border:1px solid #30363d;border-radius:10px;"
+        f"padding:14px 20px 10px 20px;margin:8px 0 16px 0'>"
+        f"<div style='display:flex;justify-content:space-between;align-items:baseline;"
+        f"margin-bottom:10px'>"
+        f"<span style='color:#8b949e;font-size:0.72rem;letter-spacing:2px;"
+        f"text-transform:uppercase;font-family:monospace'>Recorrido del campo</span>"
+        f"<span style='color:#e6edf3;font-size:1.5rem;font-weight:700;font-family:monospace;"
+        f"line-height:1'>{porcentaje:.1f}"
+        f"<span style='color:#8b949e;font-size:0.9rem'>%</span></span>"
+        f"</div>"
+        f"<div style='background:#21262d;border-radius:4px;height:6px;overflow:hidden;"
+        f"margin-bottom:8px'>"
+        f"<div style='background:linear-gradient(90deg,#238636 0%,#3fb950 100%);"
+        f"width:{porcentaje:.2f}%;height:100%;border-radius:4px'></div>"
+        f"</div>"
+        f"<div style='display:flex;justify-content:space-between'>"
+        f"<span style='color:#3fb950;font-size:0.82rem;font-weight:600;font-family:monospace'>"
+        f"{lineal.posicion_norte:.1f} m avanzados</span>"
+        f"<span style='color:#484f58;font-size:0.82rem;font-family:monospace'>"
+        f"meta {longitud_campo:.0f} m</span>"
+        f"</div></div>",
+        unsafe_allow_html=True,
     )
 
 
@@ -333,7 +406,7 @@ def build_figure(lineal: Lineal | None, longitud_campo: float) -> go.Figure:
             mx, my = (x1 + x2) / 2, (y1 + y2) / 2
             annotations.append(dict(
                 x=mx, y=my,
-                text=f"<b>{ang:+.2f}°</b>",
+                text=f"{ang:+.2f}°",
                 showarrow=False,
                 font=dict(color="#ffa657", size=13, family="monospace"),
                 bgcolor="rgba(13,17,23,0.75)",
@@ -381,29 +454,51 @@ def build_figure(lineal: Lineal | None, longitud_campo: float) -> go.Figure:
             f"<extra></extra>"
         )
 
-        # Borde verde si contactor cerrado (motor activo), gris si abierto
+        # Borde activo (verde) o inactivo (gris)
         borde_color = "#3fb950" if cont_cerrado else "#484f58"
-        
-        # Texto siempre visible: etiqueta + posicion + estado contactor
-        texto = f"{label}\ny={torre.posicion_y:.2f}m\n{'ON' if cont_cerrado else 'OFF'}"
+
+        # Estado semantico para el callout — FIX: sin etiquetas <font>, color va en font=dict()
+        if isinstance(torre, Torre_Guia):
+            estado_txt   = f"DC {torre.contactor.duty_cycle*100:.0f}%  {'ON' if cont_cerrado else 'OFF'}"
+            estado_color = color
+        else:
+            if cont_cerrado:
+                estado_txt, estado_color = "Corrigiendo", "#e3b341"
+            else:
+                estado_txt, estado_color = "Alineada", "#3fb950"
 
         # Halo
         traces.append(go.Scatter(
             x=[torre.posicion_x], y=[torre.posicion_y], mode="markers",
-            marker=dict(color=color, size=sz + 12, opacity=0.18, symbol=sym),
+            marker=dict(color=color, size=sz + 14, opacity=0.18, symbol=sym),
             hoverinfo="skip", showlegend=False))
-        
-        # Marcador + etiqueta siempre visible
+
+        # Marcador con hover detallado
         traces.append(go.Scatter(
             x=[torre.posicion_x], y=[torre.posicion_y],
-            mode="markers+text",
+            mode="markers",
             marker=dict(color=color, size=sz, symbol=sym,
                         line=dict(color=borde_color, width=2)),
-            text=[texto],
-            textposition="top center",
-            textfont=dict(color=color, size=9, family="monospace"),
             hovertemplate=hover,
             showlegend=False))
+
+        # Callout siempre visible — una sola anotacion, texto plano multilínea.
+        # Plotly SVG no renderiza <font color> pero sí respeta \n con align.
+        # El color de la caja (bordercolor) ya da pista visual del estado.
+        ay_off = -68 if i % 2 == 0 else 68
+        annotations.append(dict(
+            x=torre.posicion_x, y=torre.posicion_y,
+            xref="x", yref="y",
+            text=f"<b>{label}</b>  Y={torre.posicion_y:.2f} m<br>{estado_txt}",
+            showarrow=True,
+            arrowhead=2, arrowwidth=1.5, arrowsize=0.7,
+            arrowcolor=color,
+            ax=0, ay=ay_off,
+            font=dict(color=estado_color, size=10, family="monospace"),
+            bgcolor="rgba(22,27,34,0.92)",
+            bordercolor=estado_color, borderwidth=1, borderpad=6,
+            align="center",
+        ))
 
     pad_x = fw * 0.06
     pad_y = fh * 0.04
@@ -412,8 +507,8 @@ def build_figure(lineal: Lineal | None, longitud_campo: float) -> go.Figure:
         template="plotly_dark",
         paper_bgcolor="#0d1117",
         plot_bgcolor="#0a1f10",
-        height=600,
-        margin=dict(l=70, r=40, t=40, b=50),
+        height=620,
+        margin=dict(l=70, r=40, t=90, b=50),
         xaxis=dict(
             title=dict(text="Oeste  —  Este  (metros)", font=dict(color="#8b949e", size=12)),
             gridcolor="#1a2332", zeroline=False,
@@ -484,20 +579,38 @@ if lineal:
         cols_tr = st.columns(len(lineal.tramos))
         for col, (i, tramo) in zip(cols_tr, enumerate(lineal.tramos, 1)):
             ang = tramo.angulo_grados
-            if not tramo.esta_alineado:   estado = "CRIT"
-            elif abs(ang) < 0.5:          estado = "OK"
-            elif abs(ang) < 1.5:          estado = "WARN"
-            else:                         estado = "CRIT"
-            badge = " [R]" if tramo.es_rigido else ""
-            col.metric(
-                f"T{i}{badge}  [{estado}]",
-                f"{ang:+.3f}°",
-                delta=f"desv {tramo.desviacion_norte:+.3f} m",
-                delta_color="off",
+            if not tramo.esta_alineado:
+                estado, e_color, b_color = "CRIT", "#f85149", "#f85149"
+            elif abs(ang) < 0.5:
+                estado, e_color, b_color = "OK",   "#3fb950", "#30363d"
+            elif abs(ang) < 1.5:
+                estado, e_color, b_color = "WARN",  "#e3b341", "#e3b341"
+            else:
+                estado, e_color, b_color = "CRIT",  "#f85149", "#f85149"
+
+            fss_badge = (
+                "<span style='color:#ffa657;font-size:0.6rem;letter-spacing:1px'> FSS</span>"
+                if tramo.es_rigido else ""
+            )
+            col.markdown(
+                f"<div style='background:#161b22;border:1px solid {b_color};"
+                f"border-radius:8px;padding:10px 6px;text-align:center;margin:2px 0'>"
+                f"<div style='color:#8b949e;font-size:0.65rem;letter-spacing:1px;margin-bottom:4px'>"
+                f"TRAMO {i}{fss_badge}</div>"
+                f"<div style='color:{e_color};font-size:1.1rem;font-weight:700;"
+                f"font-family:monospace;line-height:1.2'>{ang:+.3f}°</div>"
+                f"<div style='color:#8b949e;font-size:0.7rem;font-family:monospace;margin-top:3px'>"
+                f"desv {tramo.desviacion_norte:+.3f} m</div>"
+                f"<div style='color:{e_color};font-size:0.6rem;letter-spacing:2px;margin-top:5px;"
+                f"font-weight:600'>{estado}</div>"
+                f"</div>",
+                unsafe_allow_html=True,
             )
 
 
 # BUCLE DE ANIMACION
+# FIX: capturamos excepciones de WebSocket/conexion cerrada para evitar
+# el "Task exception was never retrieved" / WebSocketClosedError en consola.
 if state.running and not state.finished:
     lineal.avanza(sim_spd)
 
@@ -505,7 +618,13 @@ if state.running and not state.finished:
         lineal.stop()
         state.running  = False
         state.finished = True
-        st.rerun()
+        try:
+            st.rerun()
+        except Exception:
+            pass
     else:
         time.sleep(0.08)
-        st.rerun()
+        try:
+            st.rerun()
+        except Exception:
+            pass
