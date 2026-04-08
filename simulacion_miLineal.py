@@ -9,17 +9,24 @@ VELOCIDAD_NOMINAL    = 3.0    # m/min cuando el motor esta ON
 VELOCIDAD_PORCENTAJE = 50     # % de tiempo ON  = velocidad media = 3.0 × 50% = 1.5 m/min
 
 
-# 2. CONFIGURACION DEL CAMPO
+# 2. CONFIGURACION GPS
+INDICE_TORRE_GPS  = 2        # torre intermedia que lleva el GPS (1..NUMERO_TRAMOS-1)
+LAT_ORIGEN        = 40.4168  # latitud  real del punto X=0,Y=0 del campo (grados decimales)
+LON_ORIGEN        = -3.7038  # longitud real del punto X=0,Y=0 del campo (grados decimales)
+PUERTO_SERIAL_GPS = None     # ej. 'COM3' para hardware real; None = solo consola
+
+
+# 3. CONFIGURACION DEL CAMPO
 LONGITUD_CAMPO = 800    # metros a recorrer
 PAUSA_VISUAL   = 0.3    # segundos reales entre pantallas (0 = sin pausa)
 
 
-# 3. ACCIONES
+# 4. ACCIONES
 # Formato: (segundo_simulado, "start" o "stop")
 ACCIONES = [
     (0,    "start"),
-    (1800, "stop"),    # para a los 30 min
-    (2400, "start"),   # rearranque a los 40 min
+    # (1800, "stop"),    # para a los 30 min
+    # (2400, "start"),   # rearranque a los 40 min
 ]
 
 
@@ -31,6 +38,13 @@ lineal = Lineal(
     velocidad_nominal    = VELOCIDAD_NOMINAL
 )
 
+lineal.asignar_gps(
+    indice_torre  = INDICE_TORRE_GPS,
+    lat_origen    = LAT_ORIGEN,
+    lon_origen    = LON_ORIGEN,
+    puerto_serial = PUERTO_SERIAL_GPS,
+)
+
 vel_media = lineal.velocidad_nominal * lineal.velocidad_porcentaje / 100.0
 
 print()
@@ -40,6 +54,7 @@ print(f"  Lineal   : {lineal.numero_tramos} tramos  |  {len(lineal.torres)} torr
 print(f"            Tramo rigido: Tramo {lineal.indice_tramo_rigido + 1}  |  Motor mas rapido: Torre {lineal.indice_torre_motor_rapido}")
 print(f"  Velocidad: {lineal.velocidad_nominal:.1f} m/min nominal  |  {lineal.velocidad_porcentaje:.0f}% duty cycle  ->  {vel_media:.2f} m/min media")
 print(f"  Campo    : {LONGITUD_CAMPO} m  |  Tiempo estimado: ~{LONGITUD_CAMPO / vel_media:.0f} min")
+print(f"  GPS      : Torre {INDICE_TORRE_GPS}  |  origen ({LAT_ORIGEN}, {LON_ORIGEN})  |  puerto: {PUERTO_SERIAL_GPS or 'consola'}")
 print()
 print("  Acciones programadas:")
 for seg, acc in sorted(ACCIONES, key=lambda a: a[0]):

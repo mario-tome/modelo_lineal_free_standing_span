@@ -1,5 +1,11 @@
 import math, random
 
+try:
+    import serial as _serial_module
+    _SERIAL_DISPONIBLE = True
+except ImportError:
+    _SERIAL_DISPONIBLE = False
+
 
 #  CONTACTOR
 #  Conecta y desconecta el motor de una torre
@@ -222,6 +228,118 @@ class Tramo:
                 f" angulo={self.angulo_grados:+.3f}grd){rigido_txt}")
 
 
+#  GPS
+#  Unidad GPS asignada a una Torre_Intermedia.
+#
+#  Convierte la posición X/Y del modelo (metros) a coordenadas reales lat/lon
+#  usando el punto de origen del campo (X=0, Y=0 = posición inicial del Cart)
+#  como referencia geográfica.
+#
+#  Las coordenadas se emiten en formato entero ×10⁷ (estándar hardware GPS):
+#    latitud  40.1234567° → 401234567
+#    longitud -3.9876543° → -39876543
+#
+#  La transmisión se realiza cada segundo de simulación a través de puerto USB-serie.
+#  Si no hay puerto configurado, los datos se imprimen en consola (modo simulación).
+class GPS:
+
+    # 1 grado de latitud ≈ 111 320 m en cualquier punto del globo
+    _METROS_POR_GRADO_LAT = 111_320.0
+
+    def __init__(self,
+                 torre: "Torre_Intermedia",
+                 lat_origen: float,
+                 lon_origen: float,
+                 puerto_serial: str = None,
+                 baudrate: int = 9600):
+        """
+        torre         : Torre_Intermedia a la que está físicamente fijado el GPS
+        lat_origen    : latitud  del punto X=0, Y=0 del lineal (grados decimales)
+                        → coordenada GPS real de donde está el Cart al iniciar
+        lon_origen    : longitud del punto X=0, Y=0 del lineal (grados decimales)
+        puerto_serial : nombre del puerto USB-serie (ej. 'COM3', '/dev/ttyUSB0')
+                        None = solo consola (modo simulación sin hardware)
+        baudrate      : velocidad del puerto serie (debe coincidir con el receptor)
+        """
+        self.torre         = torre
+        self.lat_origen    = lat_origen
+        self.lon_origen    = lon_origen
+        self.puerto_serial = puerto_serial
+        self.baudrate      = baudrate
+        self._conexion     = None   # objeto serial; se abre al primer uso
+
+    # Conversión de coordenadas  X/Y (metros) → lat/lon (grados)
+    @property
+    def latitud(self) -> float:
+        """Latitud actual de la torre en grados decimales"""
+        return self.lat_origen + (self.torre.posicion_y / self._METROS_POR_GRADO_LAT)
+
+    @property
+    def longitud(self) -> float:
+        """Longitud actual de la torre en grados decimales"""
+        metros_por_grado_lon = (self._METROS_POR_GRADO_LAT
+                                * math.cos(math.radians(self.lat_origen)))
+        return self.lon_origen + (self.torre.posicion_x / metros_por_grado_lon)
+
+    @property
+    def lat_e7(self) -> int:
+        """Latitud en formato entero ×10⁷ (para hardware GPS)"""
+        return int(self.latitud * 1e7)
+
+    @property
+    def lon_e7(self) -> int:
+        """Longitud en formato entero ×10⁷ (para hardware GPS)"""
+        return int(self.longitud * 1e7)
+
+    # Comunicación serie
+    def _abrir_puerto(self) -> bool:
+        """Intenta abrir el puerto serie. Devuelve True si está listo."""
+        if self.puerto_serial is None:
+            return False
+        if not _SERIAL_DISPONIBLE:
+            print("[GPS] pyserial no instalado. Ejecuta: pip install pyserial")
+            return False
+        try:
+            if self._conexion is None or not self._conexion.is_open:
+                self._conexion = _serial_module.Serial(
+                    self.puerto_serial, self.baudrate, timeout=1
+                )
+            return True
+        except Exception as e:
+            print(f"[GPS] Error abriendo {self.puerto_serial}: {e}")
+            return False
+
+    def cerrar_puerto(self):
+        """Cierra el puerto serie si está abierto."""
+        if self._conexion and self._conexion.is_open:
+            self._conexion.close()
+
+    def transmitir(self, verbose_consola: bool = True):
+        """
+        Envía la posición actual de la torre.
+        Formato: LAT:<lat_e7>,LON:<lon_e7>\\n
+
+        Si el puerto serie está disponible, transmite por USB siempre.
+        En modo consola (sin hardware), imprime solo si verbose_consola=True.
+        """
+        mensaje = f"LAT:{self.lat_e7},LON:{self.lon_e7}\n"
+
+        if self._abrir_puerto():
+            try:
+                self._conexion.write(mensaje.encode("utf-8"))
+            except Exception as e:
+                print(f"[GPS] Error al transmitir: {e}")
+        elif verbose_consola:
+            print(f"[GPS] {mensaje.strip()}"
+                  f"  ({self.latitud:.7f}°, {self.longitud:.7f}°)")
+
+    def __repr__(self):
+        puerto_txt = self.puerto_serial if self.puerto_serial else "consola"
+        return (f"GPS(torre_x={self.torre.posicion_x:.0f}m,"
+                f" lat={self.latitud:.7f}°, lon={self.longitud:.7f}°,"
+                f" puerto={puerto_txt})")
+
+
 #  LINEAL - Free Standing Span
 #  Torres Guía (extremos)
 #    - Tienen contactor de duty cycle: marcan el ritmo de avance de todo el lineal
@@ -329,6 +447,42 @@ class Lineal:
         self._segundo_en_ciclo     = 0
         self._en_marcha            = False   # el lineal comienza PARADO
 
+        # GPS (se asigna después con asignar_gps())
+        self.gps: GPS | None = None
+
+
+    # GPS
+    def asignar_gps(self,
+                    indice_torre: int,
+                    lat_origen: float,
+                    lon_origen: float,
+                    puerto_serial: str = None,
+                    baudrate: int = 9600):
+        """
+        Asigna una unidad GPS a una torre intermedia del lineal.
+
+        indice_torre  : índice de la torre intermedia (entre 1 y numero_tramos-1 inclusive)
+        lat_origen    : latitud  real del punto X=0, Y=0 del lineal (grados decimales)
+        lon_origen    : longitud real del punto X=0, Y=0 del lineal (grados decimales)
+        puerto_serial : puerto USB-serie (ej. 'COM3'). None = solo consola
+        baudrate      : velocidad del puerto serie
+
+        Ejemplo:
+            lineal.asignar_gps(indice_torre=2,
+                               lat_origen=40.4168,
+                               lon_origen=-3.7038,
+                               puerto_serial='COM3')
+        """
+        if not (1 <= indice_torre <= self.numero_tramos - 1):
+            raise ValueError(
+                f"indice_torre debe estar entre 1 y {self.numero_tramos - 1} "
+                f"(solo torres intermedias)"
+            )
+        torre = self.torres[indice_torre]
+        if not isinstance(torre, Torre_Intermedia):
+            raise ValueError(f"La torre {indice_torre} no es una Torre_Intermedia")
+
+        self.gps = GPS(torre, lat_origen, lon_origen, puerto_serial, baudrate)
 
     # Control del lineal
     def start(self):
@@ -383,6 +537,14 @@ class Lineal:
             # 3. Cascada derecha (der → izq): torres k+1..N-1 siguen a su vecina derecha
             for i in range(N - 1, k, -1):
                 self.torres[i].seguir(snapshot_y[i + 1], 1)
+
+            # 4. GPS: emitir posición una vez por segundo de simulación
+            # Con hardware (puerto serie): transmite siempre cada segundo
+            # Sin hardware (consola):      imprime cada 30 s para no saturar la pantalla
+            if self.gps is not None:
+                verbose = (self.gps.puerto_serial is not None
+                           or self.tiempo_total_segundos % 30 == 0)
+                self.gps.transmitir(verbose_consola=verbose)
 
 
     # Propiedades de estado
@@ -442,6 +604,10 @@ class Lineal:
         for i, tramo in enumerate(self.tramos, 1):
             print(f"    [Tramo {i}]  {tramo}")
         print()
+        if self.gps is not None:
+            print("  GPS")
+            print(f"    {self.gps}")
+            print()
 
     def _tiempo_formateado(self) -> str:
         h = self.tiempo_total_segundos // 3600
