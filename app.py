@@ -40,7 +40,7 @@ h2, h5 { color: #8b949e !important; }
 """, unsafe_allow_html=True)
 
 
-# SESSION STATE
+# SESIÓN DE STREAMLIT: variables para mantener el estado entre interacciones
 defaults = {
     "lineal":         None,
     "longitud_campo": 800,
@@ -53,7 +53,7 @@ for k, v in defaults.items():
         st.session_state[k] = v
 
 
-# SIDEBAR
+# SIDEBAR: configuracion del lineal, controles de simulacion, leyenda de colores
 with st.sidebar:
     st.markdown("## LINEAL FSS")
     st.caption("Free Standing Span — Modelo Digital")
@@ -62,7 +62,7 @@ with st.sidebar:
     state  = st.session_state
     locked = state.lineal is not None   # config bloqueada mientras existe un lineal
 
-    # --- Geometria ---
+    # Geometria del lineal y parametros de simulacion
     st.markdown("##### Geometria del Lineal")
     if locked:
         st.markdown(
@@ -77,7 +77,7 @@ with st.sidebar:
     v_nom  = c3.number_input("Vel. nominal (m/min)", 0.5, 10.0, 3.0, 0.5, disabled=locked, key="k_vnom")
     campo  = c4.number_input("Campo total (m)",   100, 5000, 800, 50,  disabled=locked, key="k_campo")
 
-    # --- Duty cycle ---
+    # Duty cycle de las torres guia, que determina la velocidad media del lineal
     st.markdown("##### Torres Guia")
     vel_pct = st.slider(
         "Duty cycle  (% ON por ciclo de 60 s)",
@@ -97,7 +97,7 @@ with st.sidebar:
         unsafe_allow_html=True,
     )
 
-    # --- Simulacion ---
+    # Simulacion automatica: velocidad de avance en segundos simulados por cada refresco de pantalla
     st.markdown("##### Simulacion")
     sim_spd = st.slider(
         "Segundos simulados por refresco",
@@ -108,7 +108,7 @@ with st.sidebar:
 
     st.divider()
 
-    # Controles
+    # Controles de simulacion: iniciar, pausar, continuar, reiniciar
     if state.lineal is None:
         if st.button("INICIAR", key="btn_iniciar", type="primary", width="stretch"):
             state.lineal = Lineal(
@@ -170,7 +170,7 @@ with st.sidebar:
         )
 
 
-# ESTADO ACTUAL
+# ESTADO ACTUAL: imprime en consola y prepara datos para la figura y metricas
 lineal: Lineal | None = state.lineal
 longitud_campo        = state.longitud_campo
 
@@ -233,7 +233,7 @@ else:
     )
 
 
-# METRICAS
+# METRICAS: tiempo, ciclo, posicion, porcentaje campo, estado de alineacion, estado de guias
 cols_m = st.columns(7)
 if lineal:
     porcentaje = min(lineal.posicion_norte / longitud_campo * 100.0, 100.0)
@@ -457,7 +457,7 @@ def build_figure(lineal: Lineal | None, longitud_campo: float) -> go.Figure:
         # Borde activo (verde) o inactivo (gris)
         borde_color = "#3fb950" if cont_cerrado else "#484f58"
 
-        # Estado semantico para el callout — FIX: sin etiquetas <font>, color va en font=dict()
+        # Estado semantico para el callout
         if isinstance(torre, Torre_Guia):
             estado_txt   = f"DC {torre.contactor.duty_cycle*100:.0f}%  {'ON' if cont_cerrado else 'OFF'}"
             estado_color = color
@@ -482,9 +482,7 @@ def build_figure(lineal: Lineal | None, longitud_campo: float) -> go.Figure:
             hovertemplate=hover,
             showlegend=False))
 
-        # Callout siempre visible — una sola anotacion, texto plano multilínea.
-        # Plotly SVG no renderiza <font color> pero sí respeta \n con align.
-        # El color de la caja (bordercolor) ya da pista visual del estado.
+        # Callout siempre visible una sola anotacion, texto plano multilínea
         ay_off = -68 if i % 2 == 0 else 68
         annotations.append(dict(
             x=torre.posicion_x, y=torre.posicion_y,
@@ -608,9 +606,7 @@ if lineal:
             )
 
 
-# BUCLE DE ANIMACION
-# FIX: capturamos excepciones de WebSocket/conexion cerrada para evitar
-# el "Task exception was never retrieved" / WebSocketClosedError en consola.
+# BUCLE DE ANIMACION: mientras el lineal esta en marcha y no ha terminado, avanza el modelo y refresca la pantalla cada cierto tiempo simulado
 if state.running and not state.finished:
     lineal.avanza(sim_spd)
 
