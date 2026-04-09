@@ -1,6 +1,5 @@
 """
 GPS RECEIVER — ejecutar en el Mac receptor
-==========================================
 Escucha el puerto serie y muestra las coordenadas GPS del lineal en tiempo real.
 
 Uso en Mac:
