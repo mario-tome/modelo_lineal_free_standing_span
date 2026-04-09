@@ -2,6 +2,9 @@
 Modelo Digital — Lineal Free Standing Span
 streamlit run app.py
 """
+import csv
+import io
+import pandas as pd
 import streamlit as st
 import plotly.graph_objects as go
 from modelo import Lineal, Torre_Guia, Torre_Intermedia, GPS
@@ -39,14 +42,12 @@ h2, h5 { color: #8b949e !important; }
 """, unsafe_allow_html=True)
 
 
-# SESIÓN DE STREAMLIT
 defaults = {
     "lineal":          None,
     "longitud_campo":  800,
     "running":         False,
     "finished":        False,
     "paused":          False,
-    # datos acumulados durante la simulacion
     "log":             [],     # eventos: {t, tipo, msg}
     "historial":       [],     # filas para CSV: {tiempo_s, pos, torres...}
     "gps_track":       [],     # últimas lecturas GPS para la mini-tabla
@@ -54,13 +55,14 @@ defaults = {
     "pos_prev":        0.0,    # posicion_norte del frame anterior
     "tramos_ok_prev":  None,   # estado de alineacion anterior para detectar cambios
 }
+
 for k, v in defaults.items():
     if k not in st.session_state:
         st.session_state[k] = v
 
 
-# ── SIDEBAR ──────────────────────────────────────────────────────────────────
-# El sidebar está FUERA del fragment: no parpadea nunca.
+# SIDEBAR
+# El sidebar está FUERA del fragment: no parpadea nunca
 with st.sidebar:
     st.markdown("## LINEAL FSS")
     st.caption("Free Standing Span — Modelo Digital")
@@ -157,6 +159,9 @@ with st.sidebar:
                     lon_origen    = st.session_state.get("k_gps_lon", -3.7038),
                     puerto_serial = puerto if puerto else None,
                 )
+                # Hilo de fondo: transmite 1 vez/segundo real, independiente de la UI
+                if puerto:
+                    state.lineal.gps.iniciar_transmision_background()
             state.longitud_campo = campo
             state.running  = True
             state.finished = False
@@ -166,6 +171,8 @@ with st.sidebar:
     elif state.running:
         if st.button("STOP / PAUSAR", key="btn_stop", width="stretch"):
             state.lineal.stop()
+            if state.lineal.gps:
+                state.lineal.gps.detener_transmision_background()
             state.log.append({"t": state.lineal._tiempo_formateado(), "tipo": "STOP",
                                "msg": f"Sistema pausado en {state.lineal.posicion_norte:.2f} m"})
             state.running = False
@@ -176,18 +183,24 @@ with st.sidebar:
         bc1, bc2 = st.columns(2)
         if bc1.button("START / CONTINUAR", key="btn_start", type="primary", width="stretch"):
             state.lineal.start()
+            if state.lineal.gps:
+                state.lineal.gps.iniciar_transmision_background()
             state.log.append({"t": state.lineal._tiempo_formateado(), "tipo": "START",
                                "msg": f"Sistema reanudado desde {state.lineal.posicion_norte:.2f} m"})
             state.running = True
             state.paused  = False
             st.rerun()
         if bc2.button("RESET", key="btn_reset", width="stretch"):
+            if state.lineal and state.lineal.gps:
+                state.lineal.gps.detener_transmision_background()
             for k, v in defaults.items():
                 state[k] = v
             st.rerun()
 
     elif state.finished:
         if st.button("REINICIAR", key="btn_reiniciar", type="primary", width="stretch"):
+            if state.lineal and state.lineal.gps:
+                state.lineal.gps.detener_transmision_background()
             for k, v in defaults.items():
                 state[k] = v
             st.rerun()
@@ -214,8 +227,7 @@ with st.sidebar:
         )
 
 
-# ── FUNCIONES DE FIGURA (módulo, no dentro del fragment) ─────────────────────
-
+# FUNCIONES DE FIGURA (módulo, no dentro del fragment)
 def _tramo_color(tramo) -> str:
     if not tramo.esta_alineado:
         return "#f85149"
@@ -497,7 +509,7 @@ def build_figure(lineal: Lineal | None, longitud_campo: float) -> go.Figure:
     return fig
 
 
-# ── PANEL PRINCIPAL ───────────────────────────────────────────────────────────
+# PANEL PRINCIPAL
 # Fragment: solo esta zona se refresca (1 vez/segundo).
 # El sidebar queda completamente estable — sin parpadeo.
 @st.fragment(run_every=1)
@@ -512,7 +524,8 @@ def panel_principal():
     # Avance de simulacion
     if state.running and not state.finished and lineal is not None:
         sim_spd_val = state.get("k_simspd", 60)
-        lineal.avanza(sim_spd_val)
+        lineal.avanza(sim_spd_val, transmitir_gps=False)
+        # GPS: el hilo background (iniciado en INICIAR) transmite por su cuenta
 
         # Velocidad real (m/min) entre este frame y el anterior
         state.vel_real = (lineal.posicion_norte - state.pos_prev) / (sim_spd_val / 60.0)
@@ -564,6 +577,8 @@ def panel_principal():
 
         if lineal.posicion_norte >= longitud_campo:
             lineal.stop()
+            if lineal.gps:
+                lineal.gps.detener_transmision_background()
             state.log.append({"t": lineal._tiempo_formateado(), "tipo": "FIN",
                                "msg": f"Riego completado — {lineal.posicion_norte:.2f} m en {lineal._tiempo_formateado()}"})
             state.running  = False
@@ -798,7 +813,6 @@ def panel_principal():
 
         with col_csv:
             if state.historial:
-                import csv, io
                 buf = io.StringIO()
                 writer = csv.DictWriter(buf, fieldnames=list(state.historial[0].keys()))
                 writer.writeheader()
