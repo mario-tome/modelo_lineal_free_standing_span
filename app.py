@@ -8,6 +8,11 @@ import pandas as pd
 import streamlit as st
 import plotly.graph_objects as go
 from modelo import Lineal, Torre_Guia, Torre_Intermedia, GPS
+try:
+    import serial.tools.list_ports as _list_ports
+    _SERIAL_DISPONIBLE = True
+except ImportError:
+    _SERIAL_DISPONIBLE = False
 
 st.set_page_config(
     page_title="Lineal FSS — Modelo Digital",
@@ -132,11 +137,21 @@ with st.sidebar:
             "Lon. origen (°)", value=-3.7038, format="%.4f",
             key="k_gps_lon", disabled=locked,
         )
-        st.text_input(
-            "Puerto serie  (vacío = consola)",
-            key="k_gps_puerto", disabled=locked,
-            placeholder="ej. COM3  /dev/ttyUSB0",
+        # Lista los puertos serie disponibles en el dispositivo
+        _SIN_PUERTO = "— Sin puerto (solo consola) —"
+        if _SERIAL_DISPONIBLE:
+            _puertos = [_SIN_PUERTO] + [p.device for p in _list_ports.comports()]
+        else:
+            _puertos = [_SIN_PUERTO]
+        c_puerto, c_refresh = st.columns([5, 1])
+        puerto_sel = c_puerto.selectbox(
+            "Puerto serie",
+            options=_puertos,
+            key="k_gps_puerto",
+            disabled=locked,
         )
+        if c_refresh.button("↺", help="Actualizar lista de puertos", disabled=locked):
+            st.rerun()
 
     st.divider()
 
@@ -152,12 +167,14 @@ with st.sidebar:
             state.lineal.start()
             state.log.append({"t": "00h 00m 00s", "tipo": "START", "msg": "Sistema iniciado"})
             if st.session_state.get("k_gps_on", False):
-                puerto = st.session_state.get("k_gps_puerto", "").strip()
+                _SIN_PUERTO = "— Sin puerto (solo consola) —"
+                puerto_raw = st.session_state.get("k_gps_puerto", _SIN_PUERTO)
+                puerto = None if (puerto_raw == _SIN_PUERTO) else puerto_raw
                 state.lineal.asignar_gps(
                     indice_torre  = st.session_state.get("k_gps_torre", 1),
                     lat_origen    = st.session_state.get("k_gps_lat", 40.4168),
                     lon_origen    = st.session_state.get("k_gps_lon", -3.7038),
-                    puerto_serial = puerto if puerto else None,
+                    puerto_serial = puerto,
                 )
                 # Hilo de fondo: transmite 1 vez/segundo real, independiente de la UI
                 if puerto:
