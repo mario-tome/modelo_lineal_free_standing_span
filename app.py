@@ -143,15 +143,16 @@ with st.sidebar:
             _puertos = [_SIN_PUERTO] + [p.device for p in _list_ports.comports()]
         else:
             _puertos = [_SIN_PUERTO]
-        c_puerto, c_refresh = st.columns([5, 1])
-        puerto_sel = c_puerto.selectbox(
-            "Puerto serie",
-            options=_puertos,
-            key="k_gps_puerto",
-            disabled=locked,
-        )
-        if c_refresh.button("↺", help="Actualizar lista de puertos", disabled=locked):
-            st.rerun()
+        st.markdown('<p style="font-size:0.875rem;margin:0 0 4px 0">Puerto serie</p>',
+                    unsafe_allow_html=True)
+        c_puerto, c_refresh = st.columns([6, 1])
+        with c_puerto:
+            st.selectbox("Puerto serie", options=_puertos, key="k_gps_puerto",
+                         disabled=locked, label_visibility="collapsed")
+        with c_refresh:
+            if st.button("↺", help="Actualizar lista de puertos",
+                         disabled=locked, use_container_width=True):
+                st.rerun()
 
     st.divider()
 
