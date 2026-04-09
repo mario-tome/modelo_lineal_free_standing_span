@@ -351,6 +351,8 @@ class GPS:
                 mensaje = f"LAT:{self.lat_e7},LON:{self.lon_e7}\n"
                 conexion.write(mensaje.encode("utf-8"))
                 conexion.flush()  # envío inmediato
+                if self.verbose_consola:
+                    print(f"[GPS] {mensaje.strip()}  ({self.latitud:.7f}°, {self.longitud:.7f}°)")
             except Exception as e:
                 print(f"[GPS] Error en transmisión: {e}")
                 break

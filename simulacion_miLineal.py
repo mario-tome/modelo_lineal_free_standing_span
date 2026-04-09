@@ -1,7 +1,6 @@
 from modelo import Lineal
 import time
 
-
 # 1. CONFIGURACION DEL LINEAL
 NUMERO_TRAMOS        = 5
 LONGITUD_TRAMO       = 50     # metros
@@ -13,7 +12,7 @@ VELOCIDAD_PORCENTAJE = 50     # % de tiempo ON  = velocidad media = 3.0 × 50% =
 INDICE_TORRE_GPS  = 2        # torre intermedia que lleva el GPS (1..NUMERO_TRAMOS-1)
 LAT_ORIGEN        = 40.4168  # latitud  real del punto X=0,Y=0 del campo (grados decimales)
 LON_ORIGEN        = -3.7038  # longitud real del punto X=0,Y=0 del campo (grados decimales)
-PUERTO_SERIAL_GPS = None     # ej. 'COM3' para hardware real; None = solo consola
+PUERTO_SERIAL_GPS = "COM3"     # ej. "COM3" para hardware real; None = solo consola
 
 
 # 3. CONFIGURACION DEL CAMPO
@@ -43,8 +42,13 @@ lineal.asignar_gps(
     lat_origen       = LAT_ORIGEN,
     lon_origen       = LON_ORIGEN,
     puerto_serial    = PUERTO_SERIAL_GPS,
-    verbose_consola  = True,   # muestra coordenadas en consola (solo en script CLI)
+    verbose_consola  = True,   # muestra coordenadas en consola
 )
+
+# Con puerto serie: el hilo background envía 1 mensaje/segundo real (sin bloquear la simulación).
+# Sin puerto serie: transmitir_gps=True en avanza() imprimirá en consola cada segundo simulado.
+if PUERTO_SERIAL_GPS:
+    lineal.gps.iniciar_transmision_background()
 
 vel_media = lineal.velocidad_nominal * lineal.velocidad_porcentaje / 100.0
 
@@ -89,7 +93,8 @@ while lineal.posicion_norte < LONGITUD_CAMPO:
             acciones_restantes.append((segundo, accion))
     acciones_pendientes = acciones_restantes
 
-    lineal.avanza(1)
+    # Con puerto serie usamos hilo background, así que no llamamos transmitir() en cada paso
+    lineal.avanza(1, transmitir_gps=(PUERTO_SERIAL_GPS is None))
 
     if lineal.tiempo_total_segundos % 300 == 0:
         lineal.estado()
@@ -98,6 +103,9 @@ while lineal.posicion_norte < LONGITUD_CAMPO:
 
 
 # RESUMEN FINAL
+if lineal.gps:
+    lineal.gps.detener_transmision_background()
+
 print()
 print("  Riego completado")
 print()
