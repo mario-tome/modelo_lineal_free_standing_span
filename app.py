@@ -90,11 +90,11 @@ with st.sidebar:
     v_nom  = c3.number_input("Vel. nominal (m/min)", 0.5, 10.0, 3.0, 0.5, disabled=locked, key="k_vnom")
     campo  = c4.number_input("Campo total (m)",      100, 5000, 800, 50,  disabled=locked, key="k_campo")
 
-    st.markdown("##### Torres Guia")
+    st.markdown("##### Set speed")
     vel_pct = st.slider(
-        "Duty cycle  (% ON por ciclo de 60 s)",
+        "Set speed  (Duty cycle %)",
         1, 100, 50, key="k_vpct", format="%d %%",
-        help="Porcentaje del ciclo de 60 s en que el motor de las guias esta encendido.",
+        help="Porcentaje de la velocidad máxima a la que avanza el lineal.",
     )
     v_media = vel_pct / 100 * v_nom
     st.markdown(
@@ -226,8 +226,8 @@ with st.sidebar:
     st.divider()
     st.markdown("##### Leyenda")
     for color, name, desc in [
-        ("#f78166", "Guia Izq (Cart)",  "Motor + duty cycle · cascada izq"),
-        ("#d2a8ff", "Guia Der",         "Motor + duty cycle · cascada der"),
+        ("#f78166", "Guia Izq (Cart)",   "Motor + set speed · cascada izq"),
+        ("#d2a8ff", "End-tower",        "Motor + set speed · cascada der"),
         ("#58a6ff", "Intermedia izq",   "Sigue guia izquierda"),
         ("#56d364", "Intermedia der",   "Sigue guia derecha"),
         ("#ffa657", "Motor rapido [R]", "Extremo der del tramo rigido"),
@@ -262,7 +262,7 @@ def _torre_style(lineal: Lineal, i: int):
     if i == 0:
         return "#f78166", "square", "CART", 20
     if i == n - 1:
-        return "#d2a8ff", "square", "GD", 20
+        return "#d2a8ff", "square", "END", 20
     if isinstance(torre, Torre_Intermedia) and torre.es_motor_rapido:
         return "#ffa657", "star", f"I{i}★", 18
     if i <= lineal.indice_tramo_rigido:
@@ -393,7 +393,7 @@ def build_figure(lineal: Lineal | None, longitud_campo: float) -> go.Figure:
         if i == 0:
             nombre = "Guia Izq (Cart)"
         elif i == n - 1:
-            nombre = "Guia Der"
+            nombre = "End-tower"
         elif isinstance(torre, Torre_Intermedia) and torre.es_motor_rapido:
             nombre = f"Intermedia {i}  [Motor Rapido — extremo der tramo rigido]"
         elif i <= lineal.indice_tramo_rigido:
@@ -403,7 +403,7 @@ def build_figure(lineal: Lineal | None, longitud_campo: float) -> go.Figure:
 
         cont_cerrado = torre.contactor.esta_cerrado
         if isinstance(torre, Torre_Guia):
-            cont_txt = f"Contactor: {'ON' if cont_cerrado else 'OFF'}  (duty {torre.contactor.duty_cycle*100:.0f}%)"
+            cont_txt = f"Contactor: {'ON' if cont_cerrado else 'OFF'}  (set speed {torre.contactor.duty_cycle*100:.0f}%)"
         else:
             cont_txt = f"Contactor: {'ON — desalineada' if cont_cerrado else 'OFF — alineada'}"
 
@@ -427,7 +427,7 @@ def build_figure(lineal: Lineal | None, longitud_campo: float) -> go.Figure:
         borde_color = "#3fb950" if cont_cerrado else "#484f58"
 
         if isinstance(torre, Torre_Guia):
-            estado_txt   = f"DC {torre.contactor.duty_cycle*100:.0f}%  {'ON' if cont_cerrado else 'OFF'}"
+            estado_txt   = f"Speed {torre.contactor.duty_cycle*100:.0f}%  {'ON' if cont_cerrado else 'OFF'}"
             estado_color = color
         else:
             if cont_cerrado:
@@ -670,8 +670,8 @@ def panel_principal():
         cols_m[2].metric("Posicion media", f"{lineal.posicion_norte:.2f} m")
         cols_m[3].metric("Recorrido",      f"{porcentaje:.1f} %")
         cols_m[4].metric("Alineacion",     "OK" if lineal.esta_alineado else "Corrigiendo")
-        cols_m[5].metric("Guia Izq",       "ON" if lineal.guia_izquierda.contactor.esta_cerrado else "OFF")
-        cols_m[6].metric("Guia Der",       "ON" if lineal.guia_derecha.contactor.esta_cerrado else "OFF")
+        cols_m[5].metric("Guia Izq (Cart)", "ON" if lineal.guia_izquierda.contactor.esta_cerrado else "OFF")
+        cols_m[6].metric("End-tower",      "ON" if lineal.guia_derecha.contactor.esta_cerrado else "OFF")
         cols_m[7].metric("Vel. real",      f"{vel_real:.2f} m/min",
                           delta=f"{delta_vel:+.2f} vs teórica",
                           delta_color="normal")
@@ -750,7 +750,7 @@ def panel_principal():
                 if i == 0:
                     color, name = "#f78166", "Guia Izq (Cart)"
                 elif i == n - 1:
-                    color, name = "#d2a8ff", "Guia Der"
+                    color, name = "#d2a8ff", "End-tower"
                 elif isinstance(torre, Torre_Intermedia) and torre.es_motor_rapido:
                     color, name = "#ffa657", f"I{i} [Motor rapido]"
                 elif i <= lineal.indice_tramo_rigido:
