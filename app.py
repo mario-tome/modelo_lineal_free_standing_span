@@ -329,14 +329,14 @@ def build_figure(lineal: Lineal | None, longitud_campo: float) -> go.Figure:
         layer="below"))
 
     annotations.append(dict(
-        x=(rx1 + rx2) / 2, y=fh,
+        x=(rx1 + rx2) / 2, y=1.0,
         text="TRAMO RIGIDO",
         showarrow=False,
         font=dict(color="#ffa657", size=13, family="monospace"),
         bgcolor="rgba(13,17,23,0.6)",
         bordercolor="#ffa657", borderwidth=1,
-        xref="x", yref="y",
-        yshift=14,
+        xref="x", yref="paper",
+        yanchor="top",
     ))
 
     # Tramos
