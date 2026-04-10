@@ -448,7 +448,7 @@ def build_figure(lineal: Lineal | None, longitud_campo: float) -> go.Figure:
             hovertemplate=hover,
             showlegend=False))
 
-        ay_off = -68 if i % 2 == 0 else 68
+        ay_off = -90 if i % 2 == 0 else 90
         annotations.append(dict(
             x=torre.posicion_x, y=torre.posicion_y,
             xref="x", yref="y",
@@ -457,9 +457,9 @@ def build_figure(lineal: Lineal | None, longitud_campo: float) -> go.Figure:
             arrowhead=2, arrowwidth=1.5, arrowsize=0.7,
             arrowcolor=color,
             ax=0, ay=ay_off,
-            font=dict(color=estado_color, size=10, family="monospace"),
+            font=dict(color=estado_color, size=13, family="monospace"),
             bgcolor="rgba(22,27,34,0.92)",
-            bordercolor=estado_color, borderwidth=1, borderpad=6,
+            bordercolor=estado_color, borderwidth=1, borderpad=10,
             align="center",
         ))
 
