@@ -56,6 +56,7 @@ defaults = {
     "log":             [],     # eventos: {t, tipo, msg}
     "historial":       [],     # filas para CSV: {tiempo_s, pos, torres...}
     "gps_track":       [],     # últimas lecturas GPS para la mini-tabla
+    "gps_prev":        None,  # lectura GPS anterior para calcular delta en UI
     "vel_real":        0.0,    # velocidad media real calculada entre frames
     "pos_prev":        0.0,    # posicion_norte del frame anterior
     "tramos_ok_prev":  None,   # estado de alineacion anterior para detectar cambios
@@ -481,7 +482,7 @@ def build_figure(lineal: Lineal | None, longitud_campo: float) -> go.Figure:
         annotations.append(dict(
             x=torre.posicion_x, y=torre.posicion_y,
             xref="x", yref="y",
-            text=f"<b>{label}</b>  Y={torre.posicion_y:.2f} m<br>{estado_txt}",
+            text=f"<b>{label}</b>  X={torre.posicion_x:.2f} m  Y={torre.posicion_y:.2f} m<br>{estado_txt}",
             showarrow=True,
             arrowhead=2, arrowwidth=1.5, arrowsize=0.7,
             arrowcolor=color,
@@ -743,10 +744,19 @@ def panel_principal():
         gps     = lineal.gps
         gps_idx = lineal.torres.index(gps.torre)
         cg      = st.columns(4)
+        # Derivar lat/lon del entero ×10⁷ → exactamente lo que viaja por el serie
+        ui_lat = gps.lat_e7 / 1e7
+        ui_lon = gps.lon_e7 / 1e7
+        prev    = state.gps_prev
+        delta_lat = round(ui_lat - prev["lat"], 7) if prev else None
+        delta_lon = round(ui_lon - prev["lon"], 7) if prev else None
         cg[0].metric("GPS · Torre",  f"Intermedia {gps_idx}")
-        cg[1].metric("Latitud",      f"{gps.latitud:.7f}°")
-        cg[2].metric("Longitud",     f"{gps.longitud:.7f}°")
+        cg[1].metric("Latitud",      f"{ui_lat:.7f}°",
+                     delta=f"{delta_lat:+.7f}°" if delta_lat is not None else None)
+        cg[2].metric("Longitud",     f"{ui_lon:.7f}°",
+                     delta=f"{delta_lon:+.7f}°" if delta_lon is not None else None)
         cg[3].metric("Formato ×10⁷", f"{gps.lat_e7}  /  {gps.lon_e7}")
+        state.gps_prev = {"lat": ui_lat, "lon": ui_lon}
 
     # MINI-TABLA GPS TRACK (últimas 10 lecturas)
     if state.gps_track:

@@ -303,12 +303,12 @@ class GPS:
     @property
     def lat_e7(self) -> int:
         """Latitud en formato entero ×10⁷ (para hardware GPS)"""
-        return int(self.latitud * 1e7)
+        return round(self.latitud * 1e7)
 
     @property
     def lon_e7(self) -> int:
         """Longitud en formato entero ×10⁷ (para hardware GPS)"""
-        return int(self.longitud * 1e7)
+        return round(self.longitud * 1e7)
 
     # Comunicación serie
     def _abrir_puerto(self) -> bool:
