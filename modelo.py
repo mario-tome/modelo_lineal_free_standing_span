@@ -97,19 +97,34 @@ class Torre_Guia(Torre):
 
     def __init__(self, posicion_x: float, posicion_y: float,
                  longitud_tramo: float, velocidad_nominal: float = 3.0,
-                 velocidad_porcentaje: float = 50.0):
+                 velocidad_porcentaje: float = 50.0,
+                 ruido_lateral: float = 0.0):
+        """
+        ruido_lateral : desviación típica de la deriva lateral por metro avanzado.
+                        Modela irregularidades del terreno (paseo aleatorio en X).
+                        0.000 → terreno perfecto
+                        0.006 → terreno suave  (~3 cm en 800 m)
+                        0.012 → terreno normal (~6 cm en 800 m)
+                        0.030 → terreno irregular (~15 cm en 800 m)
+                        0.070 → lineal loco (~35 cm en 800 m)
+        """
         super().__init__(posicion_x, posicion_y, longitud_tramo, velocidad_nominal)
-        self.contactor = Contactor(velocidad_porcentaje)
+        self.contactor     = Contactor(velocidad_porcentaje)
+        self.ruido_lateral = ruido_lateral
 
     def avanzar(self, segundos: float) -> float:
-        """Avanza a velocidad nominal únicamente cuando el contactor está CERRADO"""
+        """Avanza en Y cuando el contactor está CERRADO; acumula ruido lateral si hay terreno."""
         if self.contactor.esta_cerrado:
-            return super().avanzar(segundos)
+            metros = super().avanzar(segundos)
+            if self.ruido_lateral > 0.0 and metros > 0.0:
+                self.posicion_x += random.gauss(0.0, self.ruido_lateral * metros)
+            return metros
         return 0.0
 
     def __repr__(self):
-        return (f"Torre_Guia(x={self.posicion_x:.0f}m, y={self.posicion_y:.3f}m,"
-                f" contactor={self.contactor.estado})")
+        ruido_txt = f"  [ruido={self.ruido_lateral:.3f}]" if self.ruido_lateral > 0.0 else ""
+        return (f"Torre_Guia(x={self.posicion_x:.3f}m, y={self.posicion_y:.3f}m,"
+                f" contactor={self.contactor.estado}){ruido_txt}")
 
 
 #  TORRE_INTERMEDIA
@@ -288,12 +303,12 @@ class GPS:
     @property
     def lat_e7(self) -> int:
         """Latitud en formato entero ×10⁷ (para hardware GPS)"""
-        return int(self.latitud * 1e7)
+        return round(self.latitud * 1e7)
 
     @property
     def lon_e7(self) -> int:
         """Longitud en formato entero ×10⁷ (para hardware GPS)"""
-        return int(self.longitud * 1e7)
+        return round(self.longitud * 1e7)
 
     # Comunicación serie
     def _abrir_puerto(self) -> bool:
@@ -404,10 +419,11 @@ class Lineal:
     DURACION_CICLO = 60  # segundos por ciclo de duty cycle de las torres guía
 
     def __init__(self,
-                 numero_tramos: int        = 5,
-                 longitud_tramo: float     = 50.0,
+                 numero_tramos: int          = 5,
+                 longitud_tramo: float       = 50.0,
                  velocidad_porcentaje: float = 50.0,
-                 velocidad_nominal: float  = 3.0):
+                 velocidad_nominal: float    = 3.0,
+                 ruido_lateral: float        = 0.0):
         """
         numero_tramos        : número de tramos del lineal (mínimo 3)
                                Torres totales = numero_tramos + 1
@@ -420,6 +436,10 @@ class Lineal:
                                Velocidad media = velocidad_nominal × (velocidad_porcentaje / 100)
 
         velocidad_nominal    : velocidad de avance de cualquier motor cuando está ON (m/min)
+
+        ruido_lateral        : desviación típica de deriva lateral por metro avanzado en cada torre guía.
+                               Se propaga a ambas guías con ruido independiente (terreno distinto en cada extremo).
+                               Ver Torre_Guia para la tabla de valores orientativos.
         """
         if numero_tramos < 3:
             raise ValueError(
@@ -448,7 +468,8 @@ class Lineal:
             posicion_y           = 0.0,
             longitud_tramo       = longitud_tramo,
             velocidad_nominal    = velocidad_nominal,
-            velocidad_porcentaje = velocidad_porcentaje
+            velocidad_porcentaje = velocidad_porcentaje,
+            ruido_lateral        = ruido_lateral,
         ))
 
         for i in range(1, numero_tramos):
@@ -466,7 +487,8 @@ class Lineal:
             posicion_y           = 0.0,
             longitud_tramo       = longitud_tramo,
             velocidad_nominal    = velocidad_nominal,
-            velocidad_porcentaje = velocidad_porcentaje
+            velocidad_porcentaje = velocidad_porcentaje,
+            ruido_lateral        = ruido_lateral,
         ))
 
         # Crear tramos
@@ -576,7 +598,10 @@ class Lineal:
             for i in range(N - 1, k, -1):
                 self.torres[i].seguir(snapshot_y[i + 1], 1)
 
-            # 4. GPS: una vez por segundo simulado (solo en modo script/CLI)
+            # 4. Actualizar posiciones X de torres intermedias según la longitud real del tramo
+            self._actualizar_posiciones_x()
+
+            # 5. GPS: una vez por segundo simulado (solo en modo script/CLI)
             if self.gps is not None and transmitir_gps:
                 self.gps.transmitir()
 
@@ -642,6 +667,62 @@ class Lineal:
             print("  GPS")
             print(f"    {self.gps}")
             print()
+
+    def _actualizar_posiciones_x(self):
+        """
+        Recalcula la posición X de todas las torres intermedias respetando la longitud
+        física de cada tramo: sqrt(dx² + dy²) = L en todo momento.
+
+        El tramo rígido (FSS) se trata como un CUERPO RÍGIDO:
+          - No puede comprimirse ni estirarse aunque las guías deriven en X.
+          - Su centro geométrico se calcula como el promedio de lo que sugieren
+            la cascada izquierda y la cascada derecha por separado.
+          - Las torres de sus extremos se colocan simétricamente a ±dx_fss/2
+            respecto a ese centro, garantizando longitud exacta.
+
+        Cascada izquierda  (torres 1 .. k-1)  : X propagada desde el Cart.
+        Cascada derecha    (torres k+2 .. N-1) : X propagada desde el End-tower.
+        Tramo rígido       (torres k  y  k+1)  : cuerpo rígido centrado entre ambas cascadas.
+        """
+        k = self.indice_tramo_rigido
+        N = len(self.torres) - 1
+
+        def _dx(t_izq, t_der):
+            """Componente horizontal del tramo entre dos torres, respetando su longitud física."""
+            L    = t_izq.longitud_tramo
+            dy   = t_der.posicion_y - t_izq.posicion_y
+            return math.sqrt(max(0.0, L * L - dy * dy))
+
+        # 1. Cascada izquierda: torres 1..k-1 (excluye el extremo izq del tramo rígido)
+        for i in range(1, k):
+            t_izq = self.torres[i - 1]
+            t     = self.torres[i]
+            t.posicion_x = t_izq.posicion_x + _dx(t_izq, t)
+
+        # 2. Cascada derecha: torres k+2..N-1 (excluye el extremo der del tramo rígido)
+        for i in range(N - 1, k + 1, -1):
+            t     = self.torres[i]
+            t_der = self.torres[i + 1]
+            t.posicion_x = t_der.posicion_x - _dx(t, t_der)
+
+        # 3. Tramo rígido como cuerpo rígido
+        #    Estimación del extremo izquierdo (torre k) desde la cascada izquierda
+        t_km1 = self.torres[k - 1]
+        t_k   = self.torres[k]
+        x_k_izq = t_km1.posicion_x + _dx(t_km1, t_k)
+
+        #    Estimación del extremo derecho (torre k+1) desde la cascada derecha
+        t_k1  = self.torres[k + 1]
+        t_k2  = self.torres[k + 2]
+        x_k1_der = t_k2.posicion_x - _dx(t_k1, t_k2)
+
+        #    Componente horizontal del propio tramo rígido (longitud conservada)
+        dx_fss = _dx(t_k, t_k1)
+
+        #    Centro = promedio de ambas estimaciones → distribuye el error a ambos lados
+        x_centro = (x_k_izq + x_k1_der) / 2.0
+        t_k.posicion_x  = x_centro - dx_fss / 2.0
+        t_k1.posicion_x = x_centro + dx_fss / 2.0
 
     def _tiempo_formateado(self) -> str:
         h = self.tiempo_total_segundos // 3600

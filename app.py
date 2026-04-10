@@ -56,6 +56,7 @@ defaults = {
     "log":             [],     # eventos: {t, tipo, msg}
     "historial":       [],     # filas para CSV: {tiempo_s, pos, torres...}
     "gps_track":       [],     # últimas lecturas GPS para la mini-tabla
+    "gps_prev":        None,  # lectura GPS anterior para calcular delta en UI
     "vel_real":        0.0,    # velocidad media real calculada entre frames
     "pos_prev":        0.0,    # posicion_norte del frame anterior
     "tramos_ok_prev":  None,   # estado de alineacion anterior para detectar cambios
@@ -118,6 +119,28 @@ with st.sidebar:
     st.caption(f"Cada refresco = **{sim_spd} s** simulados  ({sim_spd / 60:.1f} min)")
 
     st.divider()
+    st.markdown("##### Terreno")
+    _TERRENOS = {
+        "Perfecto (sin ruido)":   0.000,
+        "Suave":                  0.006,
+        "Normal":                 0.012,
+        "Irregular":              0.030,
+        "Lineal loco":            0.070,
+    }
+    terreno_sel = st.selectbox(
+        "Tipo de terreno",
+        options=list(_TERRENOS.keys()),
+        index=2,
+        key="k_terreno",
+        disabled=locked,
+        help="Modela la deriva lateral natural de las torres guía según las irregularidades del terreno.",
+    )
+    ruido_val = _TERRENOS[terreno_sel]
+    if ruido_val > 0.0:
+        deriva_aprox = ruido_val * (3.0 / 60.0) * (state.get("k_vpct", 50) / 100.0) * (state.get("k_campo", 800) ** 0.5) * 60.0
+        st.caption(f"Deriva acumulada estimada al final del campo: **±{deriva_aprox:.0f} cm**")
+
+    st.divider()
     st.markdown("##### GPS")
     gps_on = st.checkbox("Activar GPS en torre intermedia", key="k_gps_on", disabled=locked)
     if gps_on:
@@ -159,11 +182,13 @@ with st.sidebar:
     # Controles
     if state.lineal is None:
         if st.button("INICIAR", key="btn_iniciar", type="primary", width="stretch"):
+            _ruido_terreno = _TERRENOS.get(st.session_state.get("k_terreno", "Normal"), 0.012)
             state.lineal = Lineal(
                 numero_tramos        = tramos,
                 longitud_tramo       = t_len,
                 velocidad_porcentaje = vel_pct,
                 velocidad_nominal    = v_nom,
+                ruido_lateral        = _ruido_terreno,
             )
             state.lineal.start()
             state.log.append({"t": "00h 00m 00s", "tipo": "START", "msg": "Sistema iniciado"})
@@ -457,7 +482,7 @@ def build_figure(lineal: Lineal | None, longitud_campo: float) -> go.Figure:
         annotations.append(dict(
             x=torre.posicion_x, y=torre.posicion_y,
             xref="x", yref="y",
-            text=f"<b>{label}</b>  Y={torre.posicion_y:.2f} m<br>{estado_txt}",
+            text=f"<b>{label}</b>  X={torre.posicion_x:.2f} m  Y={torre.posicion_y:.2f} m<br>{estado_txt}",
             showarrow=True,
             arrowhead=2, arrowwidth=1.5, arrowsize=0.7,
             arrowcolor=color,
@@ -543,6 +568,9 @@ def panel_principal():
 
     if lineal is not None:
         lineal.set_speed(state.get("k_vpct", 50))
+        _ruido_live = _TERRENOS.get(state.get("k_terreno", "Normal"), 0.012)
+        lineal.guia_izquierda.ruido_lateral = _ruido_live
+        lineal.guia_derecha.ruido_lateral   = _ruido_live
 
     # Avance de simulacion
     if state.running and not state.finished and lineal is not None:
@@ -716,10 +744,19 @@ def panel_principal():
         gps     = lineal.gps
         gps_idx = lineal.torres.index(gps.torre)
         cg      = st.columns(4)
+        # Derivar lat/lon del entero ×10⁷ → exactamente lo que viaja por el serie
+        ui_lat = gps.lat_e7 / 1e7
+        ui_lon = gps.lon_e7 / 1e7
+        prev    = state.gps_prev
+        delta_lat = round(ui_lat - prev["lat"], 7) if prev else None
+        delta_lon = round(ui_lon - prev["lon"], 7) if prev else None
         cg[0].metric("GPS · Torre",  f"Intermedia {gps_idx}")
-        cg[1].metric("Latitud",      f"{gps.latitud:.7f}°")
-        cg[2].metric("Longitud",     f"{gps.longitud:.7f}°")
+        cg[1].metric("Latitud",      f"{ui_lat:.7f}°",
+                     delta=f"{delta_lat:+.7f}°" if delta_lat is not None else None)
+        cg[2].metric("Longitud",     f"{ui_lon:.7f}°",
+                     delta=f"{delta_lon:+.7f}°" if delta_lon is not None else None)
         cg[3].metric("Formato ×10⁷", f"{gps.lat_e7}  /  {gps.lon_e7}")
+        state.gps_prev = {"lat": ui_lat, "lon": ui_lon}
 
     # MINI-TABLA GPS TRACK (últimas 10 lecturas)
     if state.gps_track:
