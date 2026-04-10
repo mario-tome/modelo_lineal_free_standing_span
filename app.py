@@ -118,6 +118,28 @@ with st.sidebar:
     st.caption(f"Cada refresco = **{sim_spd} s** simulados  ({sim_spd / 60:.1f} min)")
 
     st.divider()
+    st.markdown("##### Terreno")
+    _TERRENOS = {
+        "Perfecto (sin ruido)":   0.000,
+        "Suave":                  0.006,
+        "Normal":                 0.012,
+        "Irregular":              0.030,
+        "Lineal loco":            0.070,
+    }
+    terreno_sel = st.selectbox(
+        "Tipo de terreno",
+        options=list(_TERRENOS.keys()),
+        index=2,
+        key="k_terreno",
+        disabled=locked,
+        help="Modela la deriva lateral natural de las torres guía según las irregularidades del terreno.",
+    )
+    ruido_val = _TERRENOS[terreno_sel]
+    if ruido_val > 0.0:
+        deriva_aprox = ruido_val * (3.0 / 60.0) * (state.get("k_vpct", 50) / 100.0) * (state.get("k_campo", 800) ** 0.5) * 60.0
+        st.caption(f"Deriva acumulada estimada al final del campo: **±{deriva_aprox:.0f} cm**")
+
+    st.divider()
     st.markdown("##### GPS")
     gps_on = st.checkbox("Activar GPS en torre intermedia", key="k_gps_on", disabled=locked)
     if gps_on:
@@ -159,11 +181,13 @@ with st.sidebar:
     # Controles
     if state.lineal is None:
         if st.button("INICIAR", key="btn_iniciar", type="primary", width="stretch"):
+            _ruido_terreno = _TERRENOS.get(st.session_state.get("k_terreno", "Normal"), 0.012)
             state.lineal = Lineal(
                 numero_tramos        = tramos,
                 longitud_tramo       = t_len,
                 velocidad_porcentaje = vel_pct,
                 velocidad_nominal    = v_nom,
+                ruido_lateral        = _ruido_terreno,
             )
             state.lineal.start()
             state.log.append({"t": "00h 00m 00s", "tipo": "START", "msg": "Sistema iniciado"})
@@ -543,6 +567,9 @@ def panel_principal():
 
     if lineal is not None:
         lineal.set_speed(state.get("k_vpct", 50))
+        _ruido_live = _TERRENOS.get(state.get("k_terreno", "Normal"), 0.012)
+        lineal.guia_izquierda.ruido_lateral = _ruido_live
+        lineal.guia_derecha.ruido_lateral   = _ruido_live
 
     # Avance de simulacion
     if state.running and not state.finished and lineal is not None:
