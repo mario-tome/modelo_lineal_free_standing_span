@@ -8,6 +8,11 @@ import pandas as pd
 import streamlit as st
 import plotly.graph_objects as go
 from modelo import Lineal, Torre_Guia, Torre_Intermedia, GPS
+try:
+    import serial.tools.list_ports as _list_ports
+    _SERIAL_DISPONIBLE = True
+except ImportError:
+    _SERIAL_DISPONIBLE = False
 
 st.set_page_config(
     page_title="Lineal FSS — Modelo Digital",
@@ -85,11 +90,11 @@ with st.sidebar:
     v_nom  = c3.number_input("Vel. nominal (m/min)", 0.5, 10.0, 3.0, 0.5, disabled=locked, key="k_vnom")
     campo  = c4.number_input("Campo total (m)",      100, 5000, 800, 50,  disabled=locked, key="k_campo")
 
-    st.markdown("##### Torres Guia")
+    st.markdown("##### Set speed")
     vel_pct = st.slider(
-        "Duty cycle  (% ON por ciclo de 60 s)",
+        "Set speed  (Duty cycle %)",
         1, 100, 50, key="k_vpct", format="%d %%",
-        help="Porcentaje del ciclo de 60 s en que el motor de las guias esta encendido.",
+        help="Porcentaje de la velocidad máxima a la que avanza el lineal.",
     )
     v_media = vel_pct / 100 * v_nom
     st.markdown(
@@ -132,11 +137,22 @@ with st.sidebar:
             "Lon. origen (°)", value=-3.7038, format="%.4f",
             key="k_gps_lon", disabled=locked,
         )
-        st.text_input(
-            "Puerto serie  (vacío = consola)",
-            key="k_gps_puerto", disabled=locked,
-            placeholder="ej. COM3  /dev/ttyUSB0",
-        )
+        # Lista los puertos serie disponibles en el dispositivo
+        _SIN_PUERTO = "— Sin puerto (solo consola) —"
+        if _SERIAL_DISPONIBLE:
+            _puertos = [_SIN_PUERTO] + [p.device for p in _list_ports.comports()]
+        else:
+            _puertos = [_SIN_PUERTO]
+        st.markdown('<p style="font-size:0.875rem;margin:0 0 4px 0">Puerto serie</p>',
+                    unsafe_allow_html=True)
+        c_puerto, c_refresh = st.columns([6, 1])
+        with c_puerto:
+            st.selectbox("Puerto serie", options=_puertos, key="k_gps_puerto",
+                         disabled=locked, label_visibility="collapsed")
+        with c_refresh:
+            if st.button("↺", help="Actualizar lista de puertos",
+                         disabled=locked, use_container_width=True):
+                st.rerun()
 
     st.divider()
 
@@ -152,12 +168,14 @@ with st.sidebar:
             state.lineal.start()
             state.log.append({"t": "00h 00m 00s", "tipo": "START", "msg": "Sistema iniciado"})
             if st.session_state.get("k_gps_on", False):
-                puerto = st.session_state.get("k_gps_puerto", "").strip()
+                _SIN_PUERTO = "— Sin puerto (solo consola) —"
+                puerto_raw = st.session_state.get("k_gps_puerto", _SIN_PUERTO)
+                puerto = None if (puerto_raw == _SIN_PUERTO) else puerto_raw
                 state.lineal.asignar_gps(
                     indice_torre  = st.session_state.get("k_gps_torre", 1),
                     lat_origen    = st.session_state.get("k_gps_lat", 40.4168),
                     lon_origen    = st.session_state.get("k_gps_lon", -3.7038),
-                    puerto_serial = puerto if puerto else None,
+                    puerto_serial = puerto,
                 )
                 # Hilo de fondo: transmite 1 vez/segundo real, independiente de la UI
                 if puerto:
@@ -208,8 +226,8 @@ with st.sidebar:
     st.divider()
     st.markdown("##### Leyenda")
     for color, name, desc in [
-        ("#f78166", "Guia Izq (Cart)",  "Motor + duty cycle · cascada izq"),
-        ("#d2a8ff", "Guia Der",         "Motor + duty cycle · cascada der"),
+        ("#f78166", "Guia Izq (Cart)",   "Motor + set speed · cascada izq"),
+        ("#d2a8ff", "End-tower",        "Motor + set speed · cascada der"),
         ("#58a6ff", "Intermedia izq",   "Sigue guia izquierda"),
         ("#56d364", "Intermedia der",   "Sigue guia derecha"),
         ("#ffa657", "Motor rapido [R]", "Extremo der del tramo rigido"),
@@ -244,7 +262,7 @@ def _torre_style(lineal: Lineal, i: int):
     if i == 0:
         return "#f78166", "square", "CART", 20
     if i == n - 1:
-        return "#d2a8ff", "square", "GD", 20
+        return "#d2a8ff", "square", "END", 20
     if isinstance(torre, Torre_Intermedia) and torre.es_motor_rapido:
         return "#ffa657", "star", f"I{i}★", 18
     if i <= lineal.indice_tramo_rigido:
@@ -311,14 +329,14 @@ def build_figure(lineal: Lineal | None, longitud_campo: float) -> go.Figure:
         layer="below"))
 
     annotations.append(dict(
-        x=(rx1 + rx2) / 2, y=fh,
+        x=(rx1 + rx2) / 2, y=1.0,
         text="TRAMO RIGIDO",
         showarrow=False,
-        font=dict(color="#ffa657", size=10, family="monospace"),
+        font=dict(color="#ffa657", size=13, family="monospace"),
         bgcolor="rgba(13,17,23,0.6)",
         bordercolor="#ffa657", borderwidth=1,
-        xref="x", yref="y",
-        yshift=14,
+        xref="x", yref="paper",
+        yanchor="top",
     ))
 
     # Tramos
@@ -375,7 +393,7 @@ def build_figure(lineal: Lineal | None, longitud_campo: float) -> go.Figure:
         if i == 0:
             nombre = "Guia Izq (Cart)"
         elif i == n - 1:
-            nombre = "Guia Der"
+            nombre = "End-tower"
         elif isinstance(torre, Torre_Intermedia) and torre.es_motor_rapido:
             nombre = f"Intermedia {i}  [Motor Rapido — extremo der tramo rigido]"
         elif i <= lineal.indice_tramo_rigido:
@@ -385,7 +403,7 @@ def build_figure(lineal: Lineal | None, longitud_campo: float) -> go.Figure:
 
         cont_cerrado = torre.contactor.esta_cerrado
         if isinstance(torre, Torre_Guia):
-            cont_txt = f"Contactor: {'ON' if cont_cerrado else 'OFF'}  (duty {torre.contactor.duty_cycle*100:.0f}%)"
+            cont_txt = f"Contactor: {'ON' if cont_cerrado else 'OFF'}  (set speed {torre.contactor.duty_cycle*100:.0f}%)"
         else:
             cont_txt = f"Contactor: {'ON — desalineada' if cont_cerrado else 'OFF — alineada'}"
 
@@ -409,13 +427,13 @@ def build_figure(lineal: Lineal | None, longitud_campo: float) -> go.Figure:
         borde_color = "#3fb950" if cont_cerrado else "#484f58"
 
         if isinstance(torre, Torre_Guia):
-            estado_txt   = f"DC {torre.contactor.duty_cycle*100:.0f}%  {'ON' if cont_cerrado else 'OFF'}"
+            estado_txt   = f"Speed {torre.contactor.duty_cycle*100:.0f}%  {'ON' if cont_cerrado else 'OFF'}"
             estado_color = color
         else:
             if cont_cerrado:
-                estado_txt, estado_color = "Corrigiendo", "#e3b341"
+                estado_txt, estado_color = "Corrigiendo  ·  Motor ON", "#e3b341"
             else:
-                estado_txt, estado_color = "Alineada", "#3fb950"
+                estado_txt, estado_color = "Alineada  ·  Motor OFF", "#3fb950"
 
         traces.append(go.Scatter(
             x=[torre.posicion_x], y=[torre.posicion_y], mode="markers",
@@ -430,7 +448,12 @@ def build_figure(lineal: Lineal | None, longitud_campo: float) -> go.Figure:
             hovertemplate=hover,
             showlegend=False))
 
-        ay_off = -68 if i % 2 == 0 else 68
+        if torre.posicion_y < longitud_campo * 0.20:
+            ay_off = -90   # torre cerca del inicio → cuadrado arriba
+        elif torre.posicion_y > longitud_campo * 0.80:
+            ay_off = 90    # torre cerca del final  → cuadrado abajo
+        else:
+            ay_off = -90 if i % 2 == 0 else 90  # zona central → alterna
         annotations.append(dict(
             x=torre.posicion_x, y=torre.posicion_y,
             xref="x", yref="y",
@@ -439,9 +462,9 @@ def build_figure(lineal: Lineal | None, longitud_campo: float) -> go.Figure:
             arrowhead=2, arrowwidth=1.5, arrowsize=0.7,
             arrowcolor=color,
             ax=0, ay=ay_off,
-            font=dict(color=estado_color, size=10, family="monospace"),
+            font=dict(color=estado_color, size=13, family="monospace"),
             bgcolor="rgba(22,27,34,0.92)",
-            bordercolor=estado_color, borderwidth=1, borderpad=6,
+            bordercolor=estado_color, borderwidth=1, borderpad=10,
             align="center",
         ))
 
@@ -474,14 +497,14 @@ def build_figure(lineal: Lineal | None, longitud_campo: float) -> go.Figure:
             showarrow=True,
             arrowhead=2, arrowwidth=1.5, arrowsize=0.7, arrowcolor="#58d68d",
             ax=-80, ay=0,
-            font=dict(color="#58d68d", size=9, family="monospace"),
+            font=dict(color="#58d68d", size=13, family="monospace"),
             bgcolor="rgba(22,27,34,0.92)",
-            bordercolor="#58d68d", borderwidth=1, borderpad=5,
+            bordercolor="#58d68d", borderwidth=1, borderpad=10,
             align="center",
         ))
 
     pad_x = fw * 0.06
-    pad_y = fh * 0.04
+    pad_y = fh * 0.20
     fig = go.Figure(data=traces)
     fig.update_layout(
         template="plotly_dark",
@@ -652,8 +675,8 @@ def panel_principal():
         cols_m[2].metric("Posicion media", f"{lineal.posicion_norte:.2f} m")
         cols_m[3].metric("Recorrido",      f"{porcentaje:.1f} %")
         cols_m[4].metric("Alineacion",     "OK" if lineal.esta_alineado else "Corrigiendo")
-        cols_m[5].metric("Guia Izq",       "ON" if lineal.guia_izquierda.contactor.esta_cerrado else "OFF")
-        cols_m[6].metric("Guia Der",       "ON" if lineal.guia_derecha.contactor.esta_cerrado else "OFF")
+        cols_m[5].metric("Guia Izq (Cart)", "ON" if lineal.guia_izquierda.contactor.esta_cerrado else "OFF")
+        cols_m[6].metric("End-tower",      "ON" if lineal.guia_derecha.contactor.esta_cerrado else "OFF")
         cols_m[7].metric("Vel. real",      f"{vel_real:.2f} m/min",
                           delta=f"{delta_vel:+.2f} vs teórica",
                           delta_color="normal")
@@ -732,7 +755,7 @@ def panel_principal():
                 if i == 0:
                     color, name = "#f78166", "Guia Izq (Cart)"
                 elif i == n - 1:
-                    color, name = "#d2a8ff", "Guia Der"
+                    color, name = "#d2a8ff", "End-tower"
                 elif isinstance(torre, Torre_Intermedia) and torre.es_motor_rapido:
                     color, name = "#ffa657", f"I{i} [Motor rapido]"
                 elif i <= lineal.indice_tramo_rigido:
