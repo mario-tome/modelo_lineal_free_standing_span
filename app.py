@@ -431,9 +431,9 @@ def build_figure(lineal: Lineal | None, longitud_campo: float) -> go.Figure:
             estado_color = color
         else:
             if cont_cerrado:
-                estado_txt, estado_color = "Corrigiendo", "#e3b341"
+                estado_txt, estado_color = "Corrigiendo  ·  Motor ON", "#e3b341"
             else:
-                estado_txt, estado_color = "Alineada", "#3fb950"
+                estado_txt, estado_color = "Alineada  ·  Motor OFF", "#3fb950"
 
         traces.append(go.Scatter(
             x=[torre.posicion_x], y=[torre.posicion_y], mode="markers",
