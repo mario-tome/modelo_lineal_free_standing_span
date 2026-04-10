@@ -332,7 +332,7 @@ def build_figure(lineal: Lineal | None, longitud_campo: float) -> go.Figure:
         x=(rx1 + rx2) / 2, y=fh,
         text="TRAMO RIGIDO",
         showarrow=False,
-        font=dict(color="#ffa657", size=10, family="monospace"),
+        font=dict(color="#ffa657", size=13, family="monospace"),
         bgcolor="rgba(13,17,23,0.6)",
         bordercolor="#ffa657", borderwidth=1,
         xref="x", yref="y",
@@ -448,7 +448,12 @@ def build_figure(lineal: Lineal | None, longitud_campo: float) -> go.Figure:
             hovertemplate=hover,
             showlegend=False))
 
-        ay_off = -90 if i % 2 == 0 else 90
+        if torre.posicion_y < longitud_campo * 0.20:
+            ay_off = -90   # torre cerca del inicio → cuadrado arriba
+        elif torre.posicion_y > longitud_campo * 0.80:
+            ay_off = 90    # torre cerca del final  → cuadrado abajo
+        else:
+            ay_off = -90 if i % 2 == 0 else 90  # zona central → alterna
         annotations.append(dict(
             x=torre.posicion_x, y=torre.posicion_y,
             xref="x", yref="y",
@@ -492,14 +497,14 @@ def build_figure(lineal: Lineal | None, longitud_campo: float) -> go.Figure:
             showarrow=True,
             arrowhead=2, arrowwidth=1.5, arrowsize=0.7, arrowcolor="#58d68d",
             ax=-80, ay=0,
-            font=dict(color="#58d68d", size=9, family="monospace"),
+            font=dict(color="#58d68d", size=13, family="monospace"),
             bgcolor="rgba(22,27,34,0.92)",
-            bordercolor="#58d68d", borderwidth=1, borderpad=5,
+            bordercolor="#58d68d", borderwidth=1, borderpad=10,
             align="center",
         ))
 
     pad_x = fw * 0.06
-    pad_y = fh * 0.04
+    pad_y = fh * 0.20
     fig = go.Figure(data=traces)
     fig.update_layout(
         template="plotly_dark",
