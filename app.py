@@ -810,7 +810,7 @@ def panel_principal():
 
         with col_gps:
             if state.gps_track:
-                with st.expander(f"Track GPS — {len(state.gps_track)} lecturas", expanded=True):
+                with st.expander(f"Track GPS — {len(state.gps_track)} lecturas", expanded=False):
                     st.dataframe(
                         state.gps_track[::-1],
                         hide_index=True,
