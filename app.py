@@ -197,14 +197,14 @@ with st.sidebar:
                 puerto_raw = st.session_state.get("k_gps_puerto", _SIN_PUERTO)
                 puerto = None if (puerto_raw == _SIN_PUERTO) else puerto_raw
                 state.lineal.asignar_gps(
-                    indice_torre  = st.session_state.get("k_gps_torre", 1),
-                    lat_origen    = st.session_state.get("k_gps_lat", 40.4168),
-                    lon_origen    = st.session_state.get("k_gps_lon", -3.7038),
-                    puerto_serial = puerto,
+                    indice_torre    = st.session_state.get("k_gps_torre", 1),
+                    lat_origen      = st.session_state.get("k_gps_lat", 40.4168),
+                    lon_origen      = st.session_state.get("k_gps_lon", -3.7038),
+                    puerto_serial   = puerto,
+                    verbose_consola = (puerto is None),  # sin puerto → vuelca a consola
                 )
-                # Hilo de fondo: transmite 1 vez/segundo real, independiente de la UI
-                if puerto:
-                    state.lineal.gps.iniciar_transmision_background()
+                # Hilo de fondo: con puerto envía por serie, sin puerto imprime por consola
+                state.lineal.gps.iniciar_transmision_background()
             state.longitud_campo = campo
             state.running  = True
             state.finished = False
