@@ -772,14 +772,50 @@ def panel_principal():
         cg[3].metric("Formato ×10⁷", f"{gps.lat_e7}  /  {gps.lon_e7}")
         state.gps_prev = {"lat": ui_lat, "lon": ui_lon}
 
-    # MINI-TABLA GPS TRACK (últimas 10 lecturas)
-    if state.gps_track:
-        with st.expander(f"Track GPS — últimas {min(len(state.gps_track), 10)} lecturas", expanded=False):
-            st.dataframe(
-                state.gps_track[-10:][::-1],
-                hide_index=True,
-                width="stretch",
-            )
+    # FILA COMPACTA: CSV · LOG · GPS TRACK  (encima del campo, sin scroll)
+    if lineal:
+        col_csv, col_log, col_gps = st.columns([1, 2, 4])
+
+        with col_csv:
+            if state.historial:
+                buf = io.StringIO()
+                writer = csv.DictWriter(buf, fieldnames=list(state.historial[0].keys()))
+                writer.writeheader()
+                writer.writerows(state.historial)
+                st.download_button(
+                    label="⬇ CSV",
+                    data=buf.getvalue(),
+                    file_name="simulacion_lineal.csv",
+                    mime="text/csv",
+                    use_container_width=True,
+                )
+
+        with col_log:
+            _TIPO_COLOR = {
+                "START": "#3fb950", "STOP": "#e3b341", "FIN": "#3fb950",
+                "CRIT":  "#f85149", "OK":   "#58a6ff", "INFO": "#8b949e",
+            }
+            entradas = state.log[-60:][::-1]
+            with st.expander(f"Log  ({len(state.log)} entradas)", expanded=False):
+                for e in entradas:
+                    c = _TIPO_COLOR.get(e["tipo"], "#8b949e")
+                    st.markdown(
+                        f"<code style='color:#484f58;font-size:0.75rem'>{e['t']}</code>&nbsp;"
+                        f"<span style='background:{c}22;color:{c};border-radius:4px;"
+                        f"padding:1px 7px;font-size:0.68rem;font-family:monospace;"
+                        f"font-weight:700'>{e['tipo']}</span>&nbsp;"
+                        f"<span style='color:#e6edf3;font-size:0.82rem'>{e['msg']}</span>",
+                        unsafe_allow_html=True,
+                    )
+
+        with col_gps:
+            if state.gps_track:
+                with st.expander(f"Track GPS — {len(state.gps_track)} lecturas", expanded=True):
+                    st.dataframe(
+                        state.gps_track[::-1],
+                        hide_index=True,
+                        use_container_width=True,
+                    )
 
     # FIGURA
     st.plotly_chart(
@@ -792,43 +828,6 @@ def panel_principal():
             "toImageButtonOptions": {"filename": "lineal_fss", "format": "png"},
         },
     )
-
-    # LOG DE EVENTOS + EXPORTAR CSV
-    if lineal:
-        st.divider()
-        col_log, col_csv = st.columns([3, 1])
-
-        with col_log:
-            _TIPO_COLOR = {
-                "START": "#3fb950", "STOP": "#e3b341", "FIN": "#3fb950",
-                "CRIT":  "#f85149", "OK":   "#58a6ff", "INFO": "#8b949e",
-            }
-            entradas = state.log[-60:][::-1]   # últimas 60, más reciente arriba
-            with st.expander(f"Log de eventos  ({len(state.log)} entradas)", expanded=False):
-                for e in entradas:
-                    c = _TIPO_COLOR.get(e["tipo"], "#8b949e")
-                    st.markdown(
-                        f"<code style='color:#484f58;font-size:0.75rem'>{e['t']}</code>&nbsp;"
-                        f"<span style='background:{c}22;color:{c};border-radius:4px;"
-                        f"padding:1px 7px;font-size:0.68rem;font-family:monospace;"
-                        f"font-weight:700'>{e['tipo']}</span>&nbsp;"
-                        f"<span style='color:#e6edf3;font-size:0.82rem'>{e['msg']}</span>",
-                        unsafe_allow_html=True,
-                    )
-
-        with col_csv:
-            if state.historial:
-                buf = io.StringIO()
-                writer = csv.DictWriter(buf, fieldnames=list(state.historial[0].keys()))
-                writer.writeheader()
-                writer.writerows(state.historial)
-                st.download_button(
-                    label="Descargar CSV",
-                    data=buf.getvalue(),
-                    file_name="simulacion_lineal.csv",
-                    mime="text/csv",
-                    width="stretch",
-                )
 
 
 panel_principal()
