@@ -412,11 +412,7 @@ def build_figure(lineal: Lineal | None, longitud_campo: float) -> go.Figure:
                 f"{ang:+.2f}\u00b0<br>"
                 f"{tramo.desviacion_norte:+.3f} m"
             ),
-            showarrow=True,
-            arrowcolor="rgba(0,0,0,0)",  # conector invisible — solo posiciona el cuadro
-            arrowhead=0,
-            arrowwidth=1,
-            ax=0, ay=60,   # 60 px hacia abajo (zona ya irrigada, despejada)
+            showarrow=False,
             font=dict(color=ann_text_color, size=11, family="monospace"),
             bgcolor="rgba(13,17,23,0.82)",
             bordercolor=ann_border, borderwidth=1,
