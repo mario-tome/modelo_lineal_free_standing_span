@@ -390,16 +390,6 @@ def build_figure(lineal: Lineal | None, longitud_campo: float) -> go.Figure:
             traces.append(go.Scatter(x=[x1, x2], y=[y1, y2], mode="lines",
                 line=dict(color="#ffa657", width=3, dash="dash"),
                 hoverinfo="skip", showlegend=False))
-            mx, my = (x1 + x2) / 2, (y1 + y2) / 2
-            annotations.append(dict(
-                x=mx, y=my,
-                text=f"{ang:+.2f}°",
-                showarrow=False,
-                font=dict(color="#ffa657", size=13, family="monospace"),
-                bgcolor="rgba(13,17,23,0.75)",
-                bordercolor="#ffa657", borderwidth=1,
-                xref="x", yref="y",
-            ))
         else:
             traces.append(go.Scatter(x=[x1, x2], y=[y1, y2], mode="lines",
                 line=dict(color=color, width=14), opacity=0.12,
@@ -407,6 +397,29 @@ def build_figure(lineal: Lineal | None, longitud_campo: float) -> go.Figure:
             traces.append(go.Scatter(x=[x1, x2], y=[y1, y2], mode="lines",
                 line=dict(color=color, width=4),
                 hovertemplate=hover, showlegend=False))
+
+        # Anotacion en el punto medio de TODOS los tramos
+        mx, my = (x1 + x2) / 2, (y1 + y2) / 2
+        # Texto usa el color de alineacion (verde/amarillo/rojo)
+        ann_text_color = color
+        # Borde naranja para el FSS, color de alineacion para el resto
+        ann_border = "#ffa657" if tramo.es_rigido else color
+        header_txt = f"T{idx + 1}  FSS" if tramo.es_rigido else f"T{idx + 1}"
+        annotations.append(dict(
+            x=mx, y=my,
+            text=(
+                f"<b>{header_txt}</b><br>"
+                f"{ang:+.2f}\u00b0<br>"
+                f"{tramo.desviacion_norte:+.3f} m"
+            ),
+            showarrow=False,
+            font=dict(color=ann_text_color, size=11, family="monospace"),
+            bgcolor="rgba(13,17,23,0.82)",
+            bordercolor=ann_border, borderwidth=1,
+            borderpad=5,
+            xref="x", yref="y",
+            align="center",
+        ))
 
     # Torres
     n       = len(lineal.torres)
@@ -778,77 +791,8 @@ def panel_principal():
         },
     )
 
-    # PANEL DETALLADO DE TORRES Y TRAMOS
+    # LOG DE EVENTOS + EXPORTAR CSV
     if lineal:
-        st.divider()
-        col_t, col_tr = st.columns([1, 2])
-
-        with col_t:
-            st.markdown("##### Torres")
-            n       = len(lineal.torres)
-            gps_idx = lineal.torres.index(lineal.gps.torre) if lineal.gps else -1
-            for i, torre in enumerate(lineal.torres):
-                if i == 0:
-                    color, name = "#f78166", "Guia Izq (Cart)"
-                elif i == n - 1:
-                    color, name = "#d2a8ff", "End-tower"
-                elif isinstance(torre, Torre_Intermedia) and torre.es_motor_rapido:
-                    color, name = "#ffa657", f"I{i} [Motor rapido]"
-                elif i <= lineal.indice_tramo_rigido:
-                    color, name = "#58a6ff", f"I{i} [cascada izq]"
-                else:
-                    color, name = "#56d364", f"I{i} [cascada der]"
-
-                cont = "ON " if torre.contactor.esta_cerrado else ("OFF" if isinstance(torre, Torre_Guia) else "—  ")
-
-                gps_badge = (
-                    "<span style='background:#1a3d2b;border:1px solid #58d68d;"
-                    "border-radius:4px;padding:1px 6px;font-size:0.65rem;"
-                    "color:#58d68d;margin-left:6px;font-family:monospace'>GPS</span>"
-                    if i == gps_idx else ""
-                )
-                st.markdown(
-                    f"<span style='display:inline-block;width:8px;height:8px;"
-                    f"border-radius:50%;background:{color};margin-right:6px;vertical-align:middle'></span>"
-                    f"<b>{name}</b>{gps_badge}&nbsp;"
-                    f"<code>y={torre.posicion_y:.3f} m &nbsp; {cont}</code>",
-                    unsafe_allow_html=True,
-                )
-
-        with col_tr:
-            st.markdown("##### Tramos")
-            cols_tr = st.columns(len(lineal.tramos))
-            for col, (i, tramo) in zip(cols_tr, enumerate(lineal.tramos, 1)):
-                ang = tramo.angulo_grados
-                if not tramo.esta_alineado:
-                    estado, e_color, b_color = "CRIT", "#f85149", "#f85149"
-                elif abs(ang) < 0.5:
-                    estado, e_color, b_color = "OK",   "#3fb950", "#30363d"
-                elif abs(ang) < 1.5:
-                    estado, e_color, b_color = "WARN", "#e3b341", "#e3b341"
-                else:
-                    estado, e_color, b_color = "CRIT", "#f85149", "#f85149"
-
-                fss_badge = (
-                    "<span style='color:#ffa657;font-size:0.6rem;letter-spacing:1px'> FSS</span>"
-                    if tramo.es_rigido else ""
-                )
-                col.markdown(
-                    f"<div style='background:#161b22;border:1px solid {b_color};"
-                    f"border-radius:8px;padding:10px 6px;text-align:center;margin:2px 0'>"
-                    f"<div style='color:#8b949e;font-size:0.65rem;letter-spacing:1px;margin-bottom:4px'>"
-                    f"TRAMO {i}{fss_badge}</div>"
-                    f"<div style='color:{e_color};font-size:1.1rem;font-weight:700;"
-                    f"font-family:monospace;line-height:1.2'>{ang:+.3f}°</div>"
-                    f"<div style='color:#8b949e;font-size:0.7rem;font-family:monospace;margin-top:3px'>"
-                    f"desv {tramo.desviacion_norte:+.3f} m</div>"
-                    f"<div style='color:{e_color};font-size:0.6rem;letter-spacing:2px;margin-top:5px;"
-                    f"font-weight:600'>{estado}</div>"
-                    f"</div>",
-                    unsafe_allow_html=True,
-                )
-
-        # LOG DE EVENTOS + EXPORTAR CSV
         st.divider()
         col_log, col_csv = st.columns([3, 1])
 
