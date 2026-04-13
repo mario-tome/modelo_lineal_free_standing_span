@@ -112,7 +112,7 @@ with st.sidebar:
     st.markdown("##### Simulacion")
     sim_spd = st.slider(
         "Factor de escala temporal de ejecución x veces real",
-        1, 600, 60, key="k_simspd",
+        1, 600, 60, key="k_simspd", format="x%d",
         help="Cuantos segundos de simulacion avanza el modelo entre cada refresco de pantalla.",
     )
     st.caption(f"Cada refresco = **{sim_spd} s** avanza")
