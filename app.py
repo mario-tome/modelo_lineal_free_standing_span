@@ -1,5 +1,4 @@
 """
-Modelo Digital — Lineal Free Standing Span
 streamlit run app.py
 """
 import csv
@@ -15,7 +14,7 @@ except ImportError:
     _SERIAL_DISPONIBLE = False
 
 st.set_page_config(
-    page_title="Lineal FSS — Modelo Digital",
+    page_title="Gemelo Digital Lineal",
     layout="wide",
     initial_sidebar_state="expanded",
 )
@@ -70,8 +69,8 @@ for k, v in defaults.items():
 # SIDEBAR
 # El sidebar está FUERA del fragment: no parpadea nunca
 with st.sidebar:
-    st.markdown("## LINEAL FSS")
-    st.caption("Free Standing Span — Modelo Digital")
+    st.markdown("## LINEAL")
+    st.caption("Configura tu Gemelo Digital")
     st.divider()
 
     state  = st.session_state
@@ -91,9 +90,9 @@ with st.sidebar:
     v_nom  = c3.number_input("Vel. nominal (m/min)", 0.5, 10.0, 3.0, 0.5, disabled=locked, key="k_vnom")
     campo  = c4.number_input("Campo total (m)",      100, 5000, 800, 50,  disabled=locked, key="k_campo")
 
-    st.markdown("##### Set speed")
+    st.markdown("##### Panel speed")
     vel_pct = st.slider(
-        "Set speed  (Duty cycle %)",
+        "Panel speed  (Duty cycle %)",
         1, 100, 50, key="k_vpct", format="%d %%",
         help="Porcentaje de la velocidad máxima a la que avanza el lineal.",
     )
@@ -112,23 +111,23 @@ with st.sidebar:
 
     st.markdown("##### Simulacion")
     sim_spd = st.slider(
-        "Segundos simulados por refresco",
+        "Factor de escala temporal de ejecución x veces real",
         1, 600, 60, key="k_simspd",
         help="Cuantos segundos de simulacion avanza el modelo entre cada refresco de pantalla.",
     )
-    st.caption(f"Cada refresco = **{sim_spd} s** simulados  ({sim_spd / 60:.1f} min)")
+    st.caption(f"Cada refresco = **{sim_spd} s** avanza")
 
     st.divider()
-    st.markdown("##### Terreno")
+    st.markdown("##### Grados de patinaje por terreno")
     _TERRENOS = {
         "Perfecto (sin ruido)":   0.000,
-        "Suave":                  0.006,
+        "Poco":                  0.006,
         "Normal":                 0.012,
         "Irregular":              0.030,
         "Lineal loco":            0.070,
     }
     terreno_sel = st.selectbox(
-        "Tipo de terreno",
+        "Elije el tipo de patinaje",
         options=list(_TERRENOS.keys()),
         index=2,
         key="k_terreno",
@@ -142,10 +141,10 @@ with st.sidebar:
 
     st.divider()
     st.markdown("##### GPS")
-    gps_on = st.checkbox("Activar GPS en torre intermedia", key="k_gps_on", disabled=locked)
+    gps_on = st.checkbox("Activar GPS en una torre intermedia", key="k_gps_on", disabled=locked)
     if gps_on:
         gps_torre = st.selectbox(
-            "Torre con GPS",
+            "Torre con el GPS",
             options=list(range(1, tramos)),
             key="k_gps_torre",
             disabled=locked,
@@ -638,7 +637,7 @@ def panel_principal():
             return
 
     # CABECERA
-    st.markdown("# Modelo Digital — Lineal Free Standing Span")
+    st.markdown("# Gemelo Digital Lineal")
 
     if state.finished:
         st.markdown(

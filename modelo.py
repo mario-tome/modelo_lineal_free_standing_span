@@ -296,8 +296,7 @@ class GPS:
     @property
     def longitud(self) -> float:
         """Longitud actual de la torre en grados decimales"""
-        metros_por_grado_lon = (self._METROS_POR_GRADO_LAT
-                                * math.cos(math.radians(self.lat_origen)))
+        metros_por_grado_lon = (self._METROS_POR_GRADO_LAT * math.cos(math.radians(self.lat_origen)))
         return self.lon_origen + (self.torre.posicion_x / metros_por_grado_lon)
 
     @property
