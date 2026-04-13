@@ -1,5 +1,4 @@
 """
-Modelo Digital — Lineal Free Standing Span
 streamlit run app.py
 """
 import csv
@@ -15,7 +14,7 @@ except ImportError:
     _SERIAL_DISPONIBLE = False
 
 st.set_page_config(
-    page_title="Lineal FSS — Modelo Digital",
+    page_title="Gemelo Digital Lineal",
     layout="wide",
     initial_sidebar_state="expanded",
 )
@@ -70,8 +69,8 @@ for k, v in defaults.items():
 # SIDEBAR
 # El sidebar está FUERA del fragment: no parpadea nunca
 with st.sidebar:
-    st.markdown("## LINEAL FSS")
-    st.caption("Free Standing Span — Modelo Digital")
+    st.markdown("## LINEAL")
+    st.caption("Configura tu Gemelo Digital")
     st.divider()
 
     state  = st.session_state
@@ -91,9 +90,9 @@ with st.sidebar:
     v_nom  = c3.number_input("Vel. nominal (m/min)", 0.5, 10.0, 3.0, 0.5, disabled=locked, key="k_vnom")
     campo  = c4.number_input("Campo total (m)",      100, 5000, 800, 50,  disabled=locked, key="k_campo")
 
-    st.markdown("##### Set speed")
+    st.markdown("##### Panel speed")
     vel_pct = st.slider(
-        "Set speed  (Duty cycle %)",
+        "Panel speed  (Duty cycle %)",
         1, 100, 50, key="k_vpct", format="%d %%",
         help="Porcentaje de la velocidad máxima a la que avanza el lineal.",
     )
@@ -112,23 +111,23 @@ with st.sidebar:
 
     st.markdown("##### Simulacion")
     sim_spd = st.slider(
-        "Segundos simulados por refresco",
-        1, 600, 60, key="k_simspd",
+        "Factor de escala temporal de ejecución x veces real",
+        1, 600, 60, key="k_simspd", format="x%d",
         help="Cuantos segundos de simulacion avanza el modelo entre cada refresco de pantalla.",
     )
-    st.caption(f"Cada refresco = **{sim_spd} s** simulados  ({sim_spd / 60:.1f} min)")
+    st.caption(f"Cada refresco = **{sim_spd} s** avanza")
 
     st.divider()
-    st.markdown("##### Terreno")
+    st.markdown("##### Grados de patinaje por terreno")
     _TERRENOS = {
         "Perfecto (sin ruido)":   0.000,
-        "Suave":                  0.006,
+        "Poco":                  0.006,
         "Normal":                 0.012,
         "Irregular":              0.030,
         "Lineal loco":            0.070,
     }
     terreno_sel = st.selectbox(
-        "Tipo de terreno",
+        "Elije el tipo de patinaje",
         options=list(_TERRENOS.keys()),
         index=2,
         key="k_terreno",
@@ -142,10 +141,10 @@ with st.sidebar:
 
     st.divider()
     st.markdown("##### GPS")
-    gps_on = st.checkbox("Activar GPS en torre intermedia", key="k_gps_on", disabled=locked)
+    gps_on = st.checkbox("Activar GPS en una torre intermedia", key="k_gps_on", disabled=locked)
     if gps_on:
         gps_torre = st.selectbox(
-            "Torre con GPS",
+            "Torre con el GPS",
             options=list(range(1, tramos)),
             key="k_gps_torre",
             disabled=locked,
@@ -197,14 +196,14 @@ with st.sidebar:
                 puerto_raw = st.session_state.get("k_gps_puerto", _SIN_PUERTO)
                 puerto = None if (puerto_raw == _SIN_PUERTO) else puerto_raw
                 state.lineal.asignar_gps(
-                    indice_torre  = st.session_state.get("k_gps_torre", 1),
-                    lat_origen    = st.session_state.get("k_gps_lat", 40.4168),
-                    lon_origen    = st.session_state.get("k_gps_lon", -3.7038),
-                    puerto_serial = puerto,
+                    indice_torre    = st.session_state.get("k_gps_torre", 1),
+                    lat_origen      = st.session_state.get("k_gps_lat", 40.4168),
+                    lon_origen      = st.session_state.get("k_gps_lon", -3.7038),
+                    puerto_serial   = puerto,
+                    verbose_consola = (puerto is None),  # sin puerto → vuelca a consola
                 )
-                # Hilo de fondo: transmite 1 vez/segundo real, independiente de la UI
-                if puerto:
-                    state.lineal.gps.iniciar_transmision_background()
+                # Hilo de fondo: con puerto envía por serie, sin puerto imprime por consola
+                state.lineal.gps.iniciar_transmision_background()
             state.longitud_campo = campo
             state.running  = True
             state.finished = False
@@ -391,16 +390,6 @@ def build_figure(lineal: Lineal | None, longitud_campo: float) -> go.Figure:
             traces.append(go.Scatter(x=[x1, x2], y=[y1, y2], mode="lines",
                 line=dict(color="#ffa657", width=3, dash="dash"),
                 hoverinfo="skip", showlegend=False))
-            mx, my = (x1 + x2) / 2, (y1 + y2) / 2
-            annotations.append(dict(
-                x=mx, y=my,
-                text=f"{ang:+.2f}°",
-                showarrow=False,
-                font=dict(color="#ffa657", size=13, family="monospace"),
-                bgcolor="rgba(13,17,23,0.75)",
-                bordercolor="#ffa657", borderwidth=1,
-                xref="x", yref="y",
-            ))
         else:
             traces.append(go.Scatter(x=[x1, x2], y=[y1, y2], mode="lines",
                 line=dict(color=color, width=14), opacity=0.12,
@@ -408,6 +397,29 @@ def build_figure(lineal: Lineal | None, longitud_campo: float) -> go.Figure:
             traces.append(go.Scatter(x=[x1, x2], y=[y1, y2], mode="lines",
                 line=dict(color=color, width=4),
                 hovertemplate=hover, showlegend=False))
+
+        # Anotacion en el punto medio de TODOS los tramos
+        mx, my = (x1 + x2) / 2, (y1 + y2) / 2
+        # Texto usa el color de alineacion (verde/amarillo/rojo)
+        ann_text_color = color
+        # Borde naranja para el FSS, color de alineacion para el resto
+        ann_border = "#ffa657" if tramo.es_rigido else color
+        header_txt = f"T{idx + 1}  FSS" if tramo.es_rigido else f"T{idx + 1}"
+        annotations.append(dict(
+            x=mx, y=my,
+            text=(
+                f"<b>{header_txt}</b><br>"
+                f"{ang:+.2f}\u00b0<br>"
+                f"{tramo.desviacion_norte:+.3f} m"
+            ),
+            showarrow=False,
+            font=dict(color=ann_text_color, size=11, family="monospace"),
+            bgcolor="rgba(13,17,23,0.82)",
+            bordercolor=ann_border, borderwidth=1,
+            borderpad=5,
+            xref="x", yref="y",
+            align="center",
+        ))
 
     # Torres
     n       = len(lineal.torres)
@@ -479,6 +491,8 @@ def build_figure(lineal: Lineal | None, longitud_campo: float) -> go.Figure:
             ay_off = 90    # torre cerca del final  → cuadrado abajo
         else:
             ay_off = -90 if i % 2 == 0 else 90  # zona central → alterna
+        if i == gps_idx:
+            ay_off = 90    # GPS sube (ay=-100) → etiqueta de esta torre baja para no solapar
         annotations.append(dict(
             x=torre.posicion_x, y=torre.posicion_y,
             xref="x", yref="y",
@@ -521,7 +535,7 @@ def build_figure(lineal: Lineal | None, longitud_campo: float) -> go.Figure:
             text=f"<b>GPS</b><br>{gps.latitud:.5f}°<br>{gps.longitud:.5f}°",
             showarrow=True,
             arrowhead=2, arrowwidth=1.5, arrowsize=0.7, arrowcolor="#58d68d",
-            ax=-80, ay=0,
+            ax=0, ay=-100,  # sube sobre el marcador, lejos del span y de las anotaciones de tramos
             font=dict(color="#58d68d", size=13, family="monospace"),
             bgcolor="rgba(22,27,34,0.92)",
             bordercolor="#58d68d", borderwidth=1, borderpad=10,
@@ -638,7 +652,7 @@ def panel_principal():
             return
 
     # CABECERA
-    st.markdown("# Modelo Digital — Lineal Free Standing Span")
+    st.markdown("# Gemelo Digital Lineal")
 
     if state.finished:
         st.markdown(
@@ -758,14 +772,50 @@ def panel_principal():
         cg[3].metric("Formato ×10⁷", f"{gps.lat_e7}  /  {gps.lon_e7}")
         state.gps_prev = {"lat": ui_lat, "lon": ui_lon}
 
-    # MINI-TABLA GPS TRACK (últimas 10 lecturas)
-    if state.gps_track:
-        with st.expander(f"Track GPS — últimas {min(len(state.gps_track), 10)} lecturas", expanded=False):
-            st.dataframe(
-                state.gps_track[-10:][::-1],
-                hide_index=True,
-                width="stretch",
-            )
+    # FILA COMPACTA: CSV · LOG · GPS TRACK  (encima del campo, sin scroll)
+    if lineal:
+        col_csv, col_log, col_gps = st.columns([1, 2, 4])
+
+        with col_csv:
+            if state.historial:
+                buf = io.StringIO()
+                writer = csv.DictWriter(buf, fieldnames=list(state.historial[0].keys()))
+                writer.writeheader()
+                writer.writerows(state.historial)
+                st.download_button(
+                    label="⬇ CSV",
+                    data=buf.getvalue(),
+                    file_name="simulacion_lineal.csv",
+                    mime="text/csv",
+                    use_container_width=True,
+                )
+
+        with col_log:
+            _TIPO_COLOR = {
+                "START": "#3fb950", "STOP": "#e3b341", "FIN": "#3fb950",
+                "CRIT":  "#f85149", "OK":   "#58a6ff", "INFO": "#8b949e",
+            }
+            entradas = state.log[-60:][::-1]
+            with st.expander(f"Log  ({len(state.log)} entradas)", expanded=False):
+                for e in entradas:
+                    c = _TIPO_COLOR.get(e["tipo"], "#8b949e")
+                    st.markdown(
+                        f"<code style='color:#484f58;font-size:0.75rem'>{e['t']}</code>&nbsp;"
+                        f"<span style='background:{c}22;color:{c};border-radius:4px;"
+                        f"padding:1px 7px;font-size:0.68rem;font-family:monospace;"
+                        f"font-weight:700'>{e['tipo']}</span>&nbsp;"
+                        f"<span style='color:#e6edf3;font-size:0.82rem'>{e['msg']}</span>",
+                        unsafe_allow_html=True,
+                    )
+
+        with col_gps:
+            if state.gps_track:
+                with st.expander(f"Track GPS — {len(state.gps_track)} lecturas", expanded=False):
+                    st.dataframe(
+                        state.gps_track[::-1],
+                        hide_index=True,
+                        use_container_width=True,
+                    )
 
     # FIGURA
     st.plotly_chart(
@@ -778,112 +828,6 @@ def panel_principal():
             "toImageButtonOptions": {"filename": "lineal_fss", "format": "png"},
         },
     )
-
-    # PANEL DETALLADO DE TORRES Y TRAMOS
-    if lineal:
-        st.divider()
-        col_t, col_tr = st.columns([1, 2])
-
-        with col_t:
-            st.markdown("##### Torres")
-            n       = len(lineal.torres)
-            gps_idx = lineal.torres.index(lineal.gps.torre) if lineal.gps else -1
-            for i, torre in enumerate(lineal.torres):
-                if i == 0:
-                    color, name = "#f78166", "Guia Izq (Cart)"
-                elif i == n - 1:
-                    color, name = "#d2a8ff", "End-tower"
-                elif isinstance(torre, Torre_Intermedia) and torre.es_motor_rapido:
-                    color, name = "#ffa657", f"I{i} [Motor rapido]"
-                elif i <= lineal.indice_tramo_rigido:
-                    color, name = "#58a6ff", f"I{i} [cascada izq]"
-                else:
-                    color, name = "#56d364", f"I{i} [cascada der]"
-
-                cont = "ON " if torre.contactor.esta_cerrado else ("OFF" if isinstance(torre, Torre_Guia) else "—  ")
-
-                gps_badge = (
-                    "<span style='background:#1a3d2b;border:1px solid #58d68d;"
-                    "border-radius:4px;padding:1px 6px;font-size:0.65rem;"
-                    "color:#58d68d;margin-left:6px;font-family:monospace'>GPS</span>"
-                    if i == gps_idx else ""
-                )
-                st.markdown(
-                    f"<span style='display:inline-block;width:8px;height:8px;"
-                    f"border-radius:50%;background:{color};margin-right:6px;vertical-align:middle'></span>"
-                    f"<b>{name}</b>{gps_badge}&nbsp;"
-                    f"<code>y={torre.posicion_y:.3f} m &nbsp; {cont}</code>",
-                    unsafe_allow_html=True,
-                )
-
-        with col_tr:
-            st.markdown("##### Tramos")
-            cols_tr = st.columns(len(lineal.tramos))
-            for col, (i, tramo) in zip(cols_tr, enumerate(lineal.tramos, 1)):
-                ang = tramo.angulo_grados
-                if not tramo.esta_alineado:
-                    estado, e_color, b_color = "CRIT", "#f85149", "#f85149"
-                elif abs(ang) < 0.5:
-                    estado, e_color, b_color = "OK",   "#3fb950", "#30363d"
-                elif abs(ang) < 1.5:
-                    estado, e_color, b_color = "WARN", "#e3b341", "#e3b341"
-                else:
-                    estado, e_color, b_color = "CRIT", "#f85149", "#f85149"
-
-                fss_badge = (
-                    "<span style='color:#ffa657;font-size:0.6rem;letter-spacing:1px'> FSS</span>"
-                    if tramo.es_rigido else ""
-                )
-                col.markdown(
-                    f"<div style='background:#161b22;border:1px solid {b_color};"
-                    f"border-radius:8px;padding:10px 6px;text-align:center;margin:2px 0'>"
-                    f"<div style='color:#8b949e;font-size:0.65rem;letter-spacing:1px;margin-bottom:4px'>"
-                    f"TRAMO {i}{fss_badge}</div>"
-                    f"<div style='color:{e_color};font-size:1.1rem;font-weight:700;"
-                    f"font-family:monospace;line-height:1.2'>{ang:+.3f}°</div>"
-                    f"<div style='color:#8b949e;font-size:0.7rem;font-family:monospace;margin-top:3px'>"
-                    f"desv {tramo.desviacion_norte:+.3f} m</div>"
-                    f"<div style='color:{e_color};font-size:0.6rem;letter-spacing:2px;margin-top:5px;"
-                    f"font-weight:600'>{estado}</div>"
-                    f"</div>",
-                    unsafe_allow_html=True,
-                )
-
-        # LOG DE EVENTOS + EXPORTAR CSV
-        st.divider()
-        col_log, col_csv = st.columns([3, 1])
-
-        with col_log:
-            _TIPO_COLOR = {
-                "START": "#3fb950", "STOP": "#e3b341", "FIN": "#3fb950",
-                "CRIT":  "#f85149", "OK":   "#58a6ff", "INFO": "#8b949e",
-            }
-            entradas = state.log[-60:][::-1]   # últimas 60, más reciente arriba
-            with st.expander(f"Log de eventos  ({len(state.log)} entradas)", expanded=False):
-                for e in entradas:
-                    c = _TIPO_COLOR.get(e["tipo"], "#8b949e")
-                    st.markdown(
-                        f"<code style='color:#484f58;font-size:0.75rem'>{e['t']}</code>&nbsp;"
-                        f"<span style='background:{c}22;color:{c};border-radius:4px;"
-                        f"padding:1px 7px;font-size:0.68rem;font-family:monospace;"
-                        f"font-weight:700'>{e['tipo']}</span>&nbsp;"
-                        f"<span style='color:#e6edf3;font-size:0.82rem'>{e['msg']}</span>",
-                        unsafe_allow_html=True,
-                    )
-
-        with col_csv:
-            if state.historial:
-                buf = io.StringIO()
-                writer = csv.DictWriter(buf, fieldnames=list(state.historial[0].keys()))
-                writer.writeheader()
-                writer.writerows(state.historial)
-                st.download_button(
-                    label="Descargar CSV",
-                    data=buf.getvalue(),
-                    file_name="simulacion_lineal.csv",
-                    mime="text/csv",
-                    width="stretch",
-                )
 
 
 panel_principal()

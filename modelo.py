@@ -296,8 +296,7 @@ class GPS:
     @property
     def longitud(self) -> float:
         """Longitud actual de la torre en grados decimales"""
-        metros_por_grado_lon = (self._METROS_POR_GRADO_LAT
-                                * math.cos(math.radians(self.lat_origen)))
+        metros_por_grado_lon = (self._METROS_POR_GRADO_LAT * math.cos(math.radians(self.lat_origen)))
         return self.lon_origen + (self.torre.posicion_x / metros_por_grado_lon)
 
     @property
@@ -335,10 +334,12 @@ class GPS:
 
     # Transmisión en hilo de fondo (para uso con Streamlit y evitar bloquear la UI)
     def iniciar_transmision_background(self):
-        """Lanza un hilo daemon que envía la posición 1 vez/segundo real
+        """Lanza un hilo daemon que transmite la posición 1 vez/segundo real.
+        Si hay puerto serie → envía por USB.
+        Si no hay puerto pero verbose_consola=True → imprime por consola.
         Si ya hay un hilo activo no lanza uno nuevo."""
-        if self.puerto_serial is None:
-            return
+        if self.puerto_serial is None and not self.verbose_consola:
+            return   # nada que hacer: ni puerto ni consola
         if self._hilo is not None and self._hilo.is_alive():
             return
         self._activo = True
@@ -350,30 +351,36 @@ class GPS:
         self._activo = False
 
     def _bucle_transmision(self):
-        """Hilo interno: abre el puerto serie y transmite coordenadas cada segundo."""
-        try:
-            conexion = _serial_module.Serial(
-                self.puerto_serial, self.baudrate,
-                timeout=1, write_timeout=1,
-                rtscts=False, dsrdtr=False, xonxoff=False,
-            )
-        except Exception as e:
-            print(f"[GPS] Error abriendo {self.puerto_serial}: {e}")
-            return
+        """Hilo interno: transmite coordenadas cada segundo real.
+        Con puerto serie: escribe por USB.
+        Sin puerto (verbose_consola=True): imprime por consola."""
+        conexion = None
+        if self.puerto_serial is not None:
+            try:
+                conexion = _serial_module.Serial(
+                    self.puerto_serial, self.baudrate,
+                    timeout=1, write_timeout=1,
+                    rtscts=False, dsrdtr=False, xonxoff=False,
+                )
+            except Exception as e:
+                print(f"[GPS] Error abriendo {self.puerto_serial}: {e}")
+                return
 
         while self._activo:
-            try:
-                mensaje = f"LAT:{self.lat_e7},LON:{self.lon_e7}\n"
-                conexion.write(mensaje.encode("utf-8"))
-                conexion.flush()  # envío inmediato
-                if self.verbose_consola:
-                    print(f"[GPS] {mensaje.strip()}  ({self.latitud:.7f}°, {self.longitud:.7f}°)")
-            except Exception as e:
-                print(f"[GPS] Error en transmisión: {e}")
-                break
+            mensaje = f"LAT:{self.lat_e7},LON:{self.lon_e7}\n"
+            if conexion is not None:
+                try:
+                    conexion.write(mensaje.encode("utf-8"))
+                    conexion.flush()
+                except Exception as e:
+                    print(f"[GPS] Error en transmisión: {e}")
+                    break
+            if self.verbose_consola:
+                print(f"[GPS] {mensaje.strip()}  ({self.latitud:.7f}°, {self.longitud:.7f}°)")
             _time.sleep(1.0)
 
-        conexion.close()
+        if conexion is not None:
+            conexion.close()
 
     def transmitir(self):
         """
