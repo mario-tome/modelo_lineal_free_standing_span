@@ -412,7 +412,11 @@ def build_figure(lineal: Lineal | None, longitud_campo: float) -> go.Figure:
                 f"{ang:+.2f}\u00b0<br>"
                 f"{tramo.desviacion_norte:+.3f} m"
             ),
-            showarrow=False,
+            showarrow=True,
+            arrowcolor="rgba(0,0,0,0)",  # conector invisible — solo posiciona el cuadro
+            arrowhead=0,
+            arrowwidth=1,
+            ax=0, ay=60,   # 60 px hacia abajo (zona ya irrigada, despejada)
             font=dict(color=ann_text_color, size=11, family="monospace"),
             bgcolor="rgba(13,17,23,0.82)",
             bordercolor=ann_border, borderwidth=1,
@@ -491,6 +495,8 @@ def build_figure(lineal: Lineal | None, longitud_campo: float) -> go.Figure:
             ay_off = 90    # torre cerca del final  → cuadrado abajo
         else:
             ay_off = -90 if i % 2 == 0 else 90  # zona central → alterna
+        if i == gps_idx:
+            ay_off = 90    # GPS sube (ay=-100) → etiqueta de esta torre baja para no solapar
         annotations.append(dict(
             x=torre.posicion_x, y=torre.posicion_y,
             xref="x", yref="y",
@@ -533,7 +539,7 @@ def build_figure(lineal: Lineal | None, longitud_campo: float) -> go.Figure:
             text=f"<b>GPS</b><br>{gps.latitud:.5f}°<br>{gps.longitud:.5f}°",
             showarrow=True,
             arrowhead=2, arrowwidth=1.5, arrowsize=0.7, arrowcolor="#58d68d",
-            ax=-80, ay=0,
+            ax=0, ay=-100,  # sube sobre el marcador, lejos del span y de las anotaciones de tramos
             font=dict(color="#58d68d", size=13, family="monospace"),
             bgcolor="rgba(22,27,34,0.92)",
             bordercolor="#58d68d", borderwidth=1, borderpad=10,
