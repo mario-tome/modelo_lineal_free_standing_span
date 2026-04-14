@@ -332,16 +332,16 @@ def build_figure(lineal: Lineal | None, longitud_campo: float, pos_norte: float 
         viewport_h  = max(viewport_h, fw * 0.25)    # mínimo 25% de fw
         _full_range = viewport_h + 2 * _pad_y       # rango total de datos en Y
 
-        if _full_range >= fh + 2 * _pad_y:
+        if _full_range >= fh + _pad_y:
             # viewport mayor que el campo → campo completo
-            y_lo = -_pad_y
+            y_lo = 0
             y_hi = fh + _pad_y
         else:
             # lineal al 30 % desde el fondo del viewport; desliza hacia el norte
             y_lo = pos_norte - viewport_h * 0.30 - _pad_y
             y_hi = y_lo + _full_range
-            if y_lo < -_pad_y:          # clamp: no bajar del suelo
-                y_lo = -_pad_y
+            if y_lo < 0:                # clamp: el campo empieza en Y=0
+                y_lo = 0
                 y_hi = y_lo + _full_range
             if y_hi > fh + _pad_y:      # clamp: no superar el final del campo
                 y_hi = fh + _pad_y
@@ -599,21 +599,24 @@ def build_figure(lineal: Lineal | None, longitud_campo: float, pos_norte: float 
         range=[y_lo, y_hi],
         tickfont=dict(color="#8b949e"), ticksuffix=" m",
     )
+    _xaxis = dict(
+        title=dict(text="Oeste  —  Este  (metros)", font=dict(color="#8b949e", size=12)),
+        gridcolor="#1a2332", zeroline=False,
+        range=[-pad_x, fw + pad_x],
+        tickfont=dict(color="#8b949e"), ticksuffix=" m",
+    )
     if use_scaleanchor:
         _yaxis["scaleanchor"] = "x"
         _yaxis["scaleratio"]  = 1
+        _yaxis["constrain"]   = "domain"   # recorta el área, no expande el rango
+        _xaxis["constrain"]   = "domain"
     fig.update_layout(
         template="plotly_dark",
         paper_bgcolor="#0d1117",
         plot_bgcolor="#0a1f10",
         height=fig_height,
         margin=dict(l=70, r=40, t=90, b=50),
-        xaxis=dict(
-            title=dict(text="Oeste  —  Este  (metros)", font=dict(color="#8b949e", size=12)),
-            gridcolor="#1a2332", zeroline=False,
-            range=[-pad_x, fw + pad_x],
-            tickfont=dict(color="#8b949e"), ticksuffix=" m",
-        ),
+        xaxis=_xaxis,
         yaxis=_yaxis,
         shapes=shapes,
         annotations=annotations,
