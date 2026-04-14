@@ -174,7 +174,7 @@ with st.sidebar:
                          disabled=locked, label_visibility="collapsed")
         with c_refresh:
             if st.button("↺", help="Actualizar lista de puertos",
-                         disabled=locked, use_container_width=True):
+                         disabled=locked, width="stretch"):
                 st.rerun()
 
     st.divider()
@@ -201,7 +201,7 @@ with st.sidebar:
                     lat_origen      = st.session_state.get("k_gps_lat", 40.4168),
                     lon_origen      = st.session_state.get("k_gps_lon", -3.7038),
                     puerto_serial   = puerto,
-                    verbose_consola = (puerto is None),  # sin puerto → vuelca a consola
+                    verbose_consola = (puerto is None),  # sin puerto HW → simula salida serie por consola
                 )
                 # Hilo de fondo: con puerto envía por serie, sin puerto imprime por consola
                 state.lineal.gps.iniciar_transmision_background()
@@ -318,8 +318,8 @@ def build_figure(lineal: Lineal | None, longitud_campo: float, pos_norte: float 
     # _INNER_W_PX: ancho estimado del área interior del plot en Streamlit wide
     # (pantalla ≥1366 px, sidebar ~340 px, márgenes l=70/r=40 → ~960 px interior).
     # Calculamos el rango Y que produce ~620 px de alto para ese ancho estimado.
-    _INNER_W_PX = 960   # px
-    _INNER_H_PX = 480   # px (height=620 − márgenes t=90,b=50)
+    _INNER_W_PX = 960   # px (ancho interior estimado en Streamlit wide)
+    _INNER_H_PX = 660   # px objetivo → figura total ~800 px
     _MARGIN_V   = 140   # t + b margins
 
     pad_x  = fw * 0.06
@@ -332,25 +332,25 @@ def build_figure(lineal: Lineal | None, longitud_campo: float, pos_norte: float 
         viewport_h  = max(viewport_h, fw * 0.25)    # mínimo 25% de fw
         _full_range = viewport_h + 2 * _pad_y       # rango total de datos en Y
 
-        if _full_range >= fh + _pad_y:
+        if _full_range >= fh + 2 * _pad_y:
             # viewport mayor que el campo → campo completo
-            y_lo = 0
+            y_lo = -_pad_y
             y_hi = fh + _pad_y
         else:
             # lineal al 30 % desde el fondo del viewport; desliza hacia el norte
             y_lo = pos_norte - viewport_h * 0.30 - _pad_y
             y_hi = y_lo + _full_range
-            if y_lo < 0:                # clamp: el campo empieza en Y=0
-                y_lo = 0
+            if y_lo < -_pad_y:          # clamp inferior: margen visual bajo el lineal
+                y_lo = -_pad_y
                 y_hi = y_lo + _full_range
-            if y_hi > fh + _pad_y:      # clamp: no superar el final del campo
+            if y_hi > fh + _pad_y:      # clamp superior: margen visual sobre el campo
                 y_hi = fh + _pad_y
                 y_lo = y_hi - _full_range
 
         # Altura de figura proporcional al viewport (se ajusta si el campo es corto)
         y_range_m  = y_hi - y_lo
         fig_height = int(_INNER_W_PX * y_range_m / x_range_m) + _MARGIN_V
-        fig_height = max(380, min(fig_height, 820))
+        fig_height = max(400, min(fig_height, 950))
         use_scaleanchor = True
     else:
         # Vista general: campo completo sin restricción de escala
@@ -533,14 +533,8 @@ def build_figure(lineal: Lineal | None, longitud_campo: float, pos_norte: float 
             hovertemplate=hover,
             showlegend=False))
 
-        _vp20 = y_lo + (y_hi - y_lo) * 0.20
-        _vp80 = y_lo + (y_hi - y_lo) * 0.80
-        if torre.posicion_y < _vp20:
-            ay_off = -90   # torre cerca del fondo del viewport → etiqueta arriba
-        elif torre.posicion_y > _vp80:
-            ay_off = 90    # torre cerca de la cima del viewport → etiqueta abajo
-        else:
-            ay_off = -90 if i % 2 == 0 else 90  # zona central → alterna
+        # Patrón fijo: par → arriba, impar → abajo. Nunca cambia con la posición Y.
+        ay_off = -90 if i % 2 == 0 else 90
         if i == gps_idx:
             ay_off = 90    # GPS sube (ay=-100) → etiqueta de esta torre baja para no solapar
         annotations.append(dict(
@@ -592,11 +586,17 @@ def build_figure(lineal: Lineal | None, longitud_campo: float, pos_norte: float 
             align="center",
         ))
 
+    # Ticks Y: solo desde 0 hasta fh, sin negativos ni sobrepasar el campo
+    _nice_steps = [1, 2, 5, 10, 20, 25, 50, 100, 200, 250, 500, 1000]
+    _tick_step  = next((s for s in _nice_steps if fh / s <= 15), 1000)
+    _tickvals   = list(range(0, int(fh) + _tick_step + 1, _tick_step))
+
     fig = go.Figure(data=traces)
     _yaxis = dict(
         title=dict(text="Norte  (metros)", font=dict(color="#8b949e", size=12)),
         gridcolor="#1a2332", zeroline=False,
         range=[y_lo, y_hi],
+        tickmode="array", tickvals=_tickvals,
         tickfont=dict(color="#8b949e"), ticksuffix=" m",
     )
     _xaxis = dict(
@@ -608,8 +608,6 @@ def build_figure(lineal: Lineal | None, longitud_campo: float, pos_norte: float 
     if use_scaleanchor:
         _yaxis["scaleanchor"] = "x"
         _yaxis["scaleratio"]  = 1
-        _yaxis["constrain"]   = "domain"   # recorta el área, no expande el rango
-        _xaxis["constrain"]   = "domain"
     fig.update_layout(
         template="plotly_dark",
         paper_bgcolor="#0d1117",
@@ -842,7 +840,7 @@ def panel_principal():
                     data=buf.getvalue(),
                     file_name="simulacion_lineal.csv",
                     mime="text/csv",
-                    use_container_width=True,
+                    width="stretch",
                 )
 
         with col_log:
@@ -869,7 +867,7 @@ def panel_principal():
                     st.dataframe(
                         state.gps_track[::-1],
                         hide_index=True,
-                        use_container_width=True,
+                        width="stretch",
                     )
 
     # FIGURA
