@@ -3,8 +3,10 @@ streamlit run app.py
 """
 import csv
 import io
+import os
 import pandas as pd
 import streamlit as st
+import streamlit.components.v1 as components
 import plotly.graph_objects as go
 from modelo import Lineal, Torre_Guia, Torre_Intermedia, GPS
 try:
@@ -12,6 +14,52 @@ try:
     _SERIAL_DISPONIBLE = True
 except ImportError:
     _SERIAL_DISPONIBLE = False
+
+# Componente de teclado personalizado para controlar el lineal con teclas físicas.
+# Funciona como un mini-iframe invisible (height=0) incrustado en la página de Streamlit.
+# Escucha las teclas en el documento padre y envía el estado a Python vía postMessage.
+# El iframe persiste entre rerenderizados, por eso los listeners de teclado se añaden solo una vez.
+#   < (mantener) → giro izquierda   - (mantener) → giro derecha   R (toggle) → marcha atrás
+_GIRO_KBD_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "giro_kbd")
+os.makedirs(_GIRO_KBD_DIR, exist_ok=True)
+with open(os.path.join(_GIRO_KBD_DIR, "index.html"), "w", encoding="utf-8") as _f:
+    _f.write("""<!DOCTYPE html><html><head><script>
+var _init = false;
+var _st   = {left: false, right: false, reverse: false};
+function _send() {
+    window.parent.postMessage({
+        isStreamlitMessage: true,
+        type: 'streamlit:setComponentValue',
+        value: {left: _st.left, right: _st.right, reverse: _st.reverse},
+        dataType: 'json'
+    }, '*');
+}
+window.addEventListener('message', function(ev) {
+    if (!ev.data || ev.data.type !== 'streamlit:render') return;
+    if (!_init) {
+        _init = true;
+        window.parent.document.addEventListener('keydown', function(e) {
+            if (e.repeat) return;
+            var ch = false;
+            if (e.key === '<')              { _st.left    = true;          ch = true; }
+            if (e.key === '-')              { _st.right   = true;          ch = true; }
+            if (e.key.toLowerCase() === 'r'){ _st.reverse = !_st.reverse;  ch = true; }
+            if (ch) _send();
+        });
+        window.parent.document.addEventListener('keyup', function(e) {
+            var ch = false;
+            if (e.key === '<') { _st.left  = false; ch = true; }
+            if (e.key === '-') { _st.right = false; ch = true; }
+            if (ch) _send();
+        });
+    }
+    window.parent.postMessage(
+        {isStreamlitMessage: true, type: 'streamlit:setFrameHeight', height: 0}, '*');
+});
+window.parent.postMessage(
+    {isStreamlitMessage: true, type: 'streamlit:componentReady', apiVersion: 1}, '*');
+</script></head><body></body></html>""")
+_giro_kbd = components.declare_component("pivot_giro_kbd", path=_GIRO_KBD_DIR)
 
 st.set_page_config(
     page_title="Gemelo Digital Lineal",
@@ -60,6 +108,11 @@ defaults = {
     "pos_prev":        0.0,    # posicion_norte del frame anterior
     "tramos_ok_prev":  None,   # estado de alineacion anterior para detectar cambios
     "k_vista_general": False,  # True = campo completo, False = seguir lineal 1:1
+    "giro_modo":        None,   # None | 'izq' | 'der'  — giro manual del pivot
+    "tower_trails":     None,   # list[list[(x,y)]] — histórico de posiciones por torre
+    "giro_rail_x":      None,   # (x_cart, x_end) antes de iniciar giro → se restaura al parar
+    "marcha_atras_kbd": False,  # estado del pulsador 'S' — sincronizado con el componente JS
+    "ar_pasadas":       0,      # número de inversiones automáticas realizadas (auto-reverse)
 }
 
 for k, v in defaults.items():
@@ -67,8 +120,7 @@ for k, v in defaults.items():
         st.session_state[k] = v
 
 
-# SIDEBAR
-# El sidebar está FUERA del fragment: no parpadea nunca
+# Sidebar: se renderiza una sola vez, nunca parpadea
 with st.sidebar:
     st.markdown("## LINEAL")
     st.caption("Configura tu Gemelo Digital")
@@ -141,6 +193,38 @@ with st.sidebar:
         st.caption(f"Deriva acumulada estimada al final del campo: **±{deriva_aprox:.0f} cm**")
 
     st.divider()
+    st.markdown("##### Auto-reverse")
+    ar_on = st.toggle(
+        "Activar auto-reverse",
+        key="k_auto_reverse",
+        help="El lineal rebota automáticamente entre los límites Y configurados. "
+             "La tecla S sigue funcionando para forzar un giro manual en cualquier momento.",
+    )
+    if ar_on:
+        _ar_ymin_def = 0
+        _ar_ymax_def = int(state.get("k_campo", 800))
+        c_ar1, c_ar2 = st.columns(2)
+        c_ar1.number_input(
+            "Y mín (m)", min_value=0, max_value=_ar_ymax_def,
+            value=state.get("k_ar_ymin", _ar_ymin_def),
+            step=5, key="k_ar_ymin",
+            help="Posición norte mínima — al llegar aquí en marcha atrás se invierte a avance",
+        )
+        c_ar2.number_input(
+            "Y máx (m)", min_value=0, max_value=int(campo),
+            value=state.get("k_ar_ymax", _ar_ymax_def),
+            step=5, key="k_ar_ymax",
+            help="Posición norte máxima — al llegar aquí en avance se invierte a marcha atrás",
+        )
+        _ymin_disp = state.get("k_ar_ymin", _ar_ymin_def)
+        _ymax_disp = state.get("k_ar_ymax", _ar_ymax_def)
+        _pasadas   = state.get("ar_pasadas", 0)
+        st.caption(
+            f"Rebota entre **{_ymin_disp} m** y **{_ymax_disp} m**"
+            + (f"  ·  **{_pasadas}** inversiones" if state.running else "")
+        )
+
+    st.divider()
     st.markdown("##### GPS")
     gps_on = st.checkbox("Activar GPS en una torre intermedia", key="k_gps_on", disabled=locked)
     if gps_on:
@@ -205,10 +289,12 @@ with st.sidebar:
                 )
                 # Hilo de fondo: con puerto envía por serie, sin puerto imprime por consola
                 state.lineal.gps.iniciar_transmision_background()
-            state.longitud_campo = campo
-            state.running  = True
-            state.finished = False
-            state.paused   = False
+            state.longitud_campo  = campo
+            state.running         = True
+            state.finished        = False
+            state.paused          = False
+            state.giro_modo       = None
+            state.tower_trails    = [[] for _ in range(len(state.lineal.torres))]
             st.rerun()
 
     elif state.running:
@@ -218,8 +304,9 @@ with st.sidebar:
                 state.lineal.gps.detener_transmision_background()
             state.log.append({"t": state.lineal._tiempo_formateado(), "tipo": "STOP",
                                "msg": f"Sistema pausado en {state.lineal.posicion_norte:.2f} m"})
-            state.running = False
-            state.paused  = True
+            state.running   = False
+            state.paused    = True
+            state.giro_modo = None
             st.rerun()
 
     elif state.paused and not state.finished:
@@ -249,6 +336,20 @@ with st.sidebar:
             st.rerun()
 
     st.divider()
+    st.markdown("##### Teclado (simulación activa)")
+    for _key, _desc in [
+        ("< (mantener)", "Giro izq — Cart lento (pivote), End-tower barre arco"),
+        ("- (mantener)", "Giro der — End-tower lento (pivote), Cart barre arco"),
+        ("R (pulsar)",   "Marcha atrás / avance normal"),
+    ]:
+        st.markdown(
+            f"<code style='background:#161b22;border:1px solid #30363d;border-radius:4px;"
+            f"padding:1px 6px;font-size:0.78rem;color:#e6edf3'>{_key}</code>"
+            f"<span style='color:#8b949e;font-size:0.78rem;margin-left:6px'>{_desc}</span>",
+            unsafe_allow_html=True,
+        )
+
+    st.divider()
     st.markdown("##### Leyenda")
     for color, name, desc in [
         ("#f78166", "Guia Izq (Cart)",   "Motor + set speed · cascada izq"),
@@ -270,7 +371,7 @@ with st.sidebar:
         )
 
 
-# FUNCIONES DE FIGURA (módulo, no dentro del fragment)
+# Funciones de la figura Plotly (definidas fuera del fragment)
 def _tramo_color(tramo) -> str:
     if not tramo.esta_alineado:
         return "#f85149"
@@ -295,7 +396,9 @@ def _torre_style(lineal: Lineal, i: int):
     return "#56d364", "circle", f"I{i}", 14
 
 
-def build_figure(lineal: Lineal | None, longitud_campo: float, pos_norte: float = 0.0, vista_general: bool = False) -> go.Figure:
+def build_figure(lineal: Lineal | None, longitud_campo: float, pos_norte: float = 0.0,
+                 vista_general: bool = False, tower_trails: list | None = None,
+                 giro_modo: str | None = None) -> go.Figure:
     if lineal is None:
         fig = go.Figure()
         fig.update_layout(
@@ -313,14 +416,11 @@ def build_figure(lineal: Lineal | None, longitud_campo: float, pos_norte: float 
     fw, fh = lineal.longitud_total, longitud_campo
     traces, shapes, annotations = [], [], []
 
-    # ── Viewport Y ──────────────────────────────────────────────────────────
-    # Escala 1:1 real mediante scaleanchor="x" en Plotly.
-    # _INNER_W_PX: ancho estimado del área interior del plot en Streamlit wide
-    # (pantalla ≥1366 px, sidebar ~340 px, márgenes l=70/r=40 → ~960 px interior).
-    # Calculamos el rango Y que produce ~620 px de alto para ese ancho estimado.
-    _INNER_W_PX = 960   # px (ancho interior estimado en Streamlit wide)
-    _INNER_H_PX = 660   # px objetivo → figura total ~800 px
-    _MARGIN_V   = 140   # t + b margins
+    # Viewport Y: calcula el rango visible para mantener escala 1:1 (scaleanchor en Plotly).
+    # Los px estiman el área de trazado en pantalla wide típica (sidebar ~340 px).
+    _INNER_W_PX = 960   # px — ancho interior
+    _INNER_H_PX = 660   # px — alto objetivo
+    _MARGIN_V   = 140   # px — márgenes top+bottom
 
     pad_x  = fw * 0.06
     _pad_y = max(20.0, fw * 0.05)
@@ -358,7 +458,6 @@ def build_figure(lineal: Lineal | None, longitud_campo: float, pos_norte: float 
         y_hi = fh + fh * 0.20
         fig_height = 620
         use_scaleanchor = False
-    # ────────────────────────────────────────────────────────────────────────
 
     # Fondo del campo
     shapes.append(dict(type="rect", xref="x", yref="y",
@@ -410,6 +509,57 @@ def build_figure(lineal: Lineal | None, longitud_campo: float, pos_norte: float 
         xref="x", yref="paper",
         yanchor="top",
     ))
+
+    # Trayectorias históricas de cada torre
+    if tower_trails:
+        for _ti in range(len(lineal.torres)):
+            _trail = tower_trails[_ti] if _ti < len(tower_trails) else []
+            if len(_trail) < 2:
+                continue
+            _tc, _, _, _ = _torre_style(lineal, _ti)
+            traces.append(go.Scatter(
+                x=[p[0] for p in _trail],
+                y=[p[1] for p in _trail],
+                mode="lines",
+                line=dict(color=_tc, width=1.5),
+                opacity=0.35,
+                hoverinfo="skip",
+                showlegend=False,
+            ))
+
+    # Líneas de referencia del giro activo
+    if giro_modo is not None:
+        _y_lider   = (lineal.torres[0].posicion_y  if giro_modo == 'izq'
+                      else lineal.torres[-1].posicion_y)
+        _y_rezagado = (lineal.torres[-1].posicion_y if giro_modo == 'izq'
+                       else lineal.torres[0].posicion_y)
+        _delta_giro = abs(_y_lider - _y_rezagado)
+
+        # Frente lider: donde estaría el lineal si fuera recto
+        traces.append(go.Scatter(
+            x=[0, fw], y=[_y_lider, _y_lider],
+            mode="lines",
+            line=dict(color="rgba(255,255,255,0.28)", width=1, dash="dash"),
+            hoverinfo="skip", showlegend=False,
+        ))
+        # Guía rezagada: ancla del giro
+        traces.append(go.Scatter(
+            x=[0, fw], y=[_y_rezagado, _y_rezagado],
+            mode="lines",
+            line=dict(color="rgba(255,200,100,0.22)", width=1, dash="dot"),
+            hoverinfo="skip", showlegend=False,
+        ))
+        # 'der' = Cart es pivote = lado izquierdo lento = giro izquierda (tecla <)
+        # 'izq' = End-tower es pivote = lado derecho lento = giro derecha (tecla -)
+        _dir_txt = "◀ GIRO IZQ" if giro_modo == 'der' else "GIRO DER ▶"
+        annotations.append(dict(
+            x=fw * 0.5, y=_y_lider,
+            xref="x", yref="y",
+            text=f"<b>{_dir_txt}  ·  Δ {_delta_giro:.2f} m</b>",
+            showarrow=False, yanchor="bottom",
+            font=dict(color="rgba(255,255,255,0.55)", size=11, family="monospace"),
+            bgcolor="rgba(13,17,23,0.0)", borderwidth=0,
+        ))
 
     # Tramos
     for idx, tramo in enumerate(lineal.tramos):
@@ -624,9 +774,7 @@ def build_figure(lineal: Lineal | None, longitud_campo: float, pos_norte: float 
     return fig
 
 
-# PANEL PRINCIPAL
-# Fragment: solo esta zona se refresca (1 vez/segundo).
-# El sidebar queda completamente estable — sin parpadeo.
+# Panel principal: fragment que se refresca cada segundo (sidebar permanece estable)
 @st.fragment(run_every=1)
 def panel_principal():
     state          = st.session_state
@@ -642,8 +790,15 @@ def panel_principal():
     # Avance de simulacion
     if state.running and not state.finished and lineal is not None:
         sim_spd_val = state.get("k_simspd", 60)
-        lineal.avanza(sim_spd_val, transmitir_gps=False)
+        lineal.avanza(sim_spd_val, transmitir_gps=False, modo_giro=state.giro_modo)
         # GPS: el hilo background (iniciado en INICIAR) transmite por su cuenta
+
+        # Registro de trayectorias para el renderizado
+        if state.tower_trails is not None and len(state.tower_trails) == len(lineal.torres):
+            for _ti, _torre in enumerate(lineal.torres):
+                state.tower_trails[_ti].append((_torre.posicion_x, _torre.posicion_y))
+            if len(state.tower_trails[0]) > 2000:
+                state.tower_trails = [tr[-2000:] for tr in state.tower_trails]
 
         # Velocidad real (m/min) entre este frame y el anterior
         state.vel_real = (lineal.posicion_norte - state.pos_prev) / (sim_spd_val / 60.0)
@@ -693,16 +848,48 @@ def panel_principal():
                     })
         state.tramos_ok_prev = tramos_ok
 
-        if lineal.posicion_norte >= longitud_campo:
-            lineal.stop()
-            if lineal.gps:
-                lineal.gps.detener_transmision_background()
-            state.log.append({"t": lineal._tiempo_formateado(), "tipo": "FIN",
-                               "msg": f"Riego completado — {lineal.posicion_norte:.2f} m en {lineal._tiempo_formateado()}"})
-            state.running  = False
-            state.finished = True
-            st.rerun()
-            return
+        # Límites del campo: auto-reverse o parada normal
+        _ar_on   = state.get("k_auto_reverse", False)
+        _ar_ymin = float(state.get("k_ar_ymin", 0))
+        _ar_ymax = float(state.get("k_ar_ymax", longitud_campo))
+
+        if _ar_on:
+            # Comprobamos ambos extremos independientemente de la dirección actual
+            # para capturar el caso en que la velocidad de simulación es alta y
+            # el centroide del lineal ya está al otro lado cuando se evalúa el tick.
+            _pos = lineal.posicion_norte
+            if not lineal.en_marcha_atras and _pos >= _ar_ymax:
+                lineal.invertir_direccion()
+                state.ar_pasadas += 1
+                state.log.append({
+                    "t":    lineal._tiempo_formateado(),
+                    "tipo": "INFO",
+                    "msg":  f"Auto-reverse ▼  ({_pos:.1f} m ≥ {_ar_ymax:.0f} m)  "
+                            f"— pasada #{state.ar_pasadas}",
+                })
+            elif lineal.en_marcha_atras and _pos <= _ar_ymin:
+                lineal.invertir_direccion()
+                state.ar_pasadas += 1
+                state.log.append({
+                    "t":    lineal._tiempo_formateado(),
+                    "tipo": "INFO",
+                    "msg":  f"Auto-reverse ▲  ({_pos:.1f} m ≤ {_ar_ymin:.0f} m)  "
+                            f"— pasada #{state.ar_pasadas}",
+                })
+        else:
+            if lineal.posicion_norte >= longitud_campo:
+                lineal.stop()
+                if lineal.gps:
+                    lineal.gps.detener_transmision_background()
+                state.log.append({
+                    "t":    lineal._tiempo_formateado(),
+                    "tipo": "FIN",
+                    "msg":  f"Riego completado — {lineal.posicion_norte:.2f} m en {lineal._tiempo_formateado()}",
+                })
+                state.running  = False
+                state.finished = True
+                st.rerun()
+                return
 
     # CABECERA
     st.markdown("# Gemelo Digital Lineal")
@@ -724,14 +911,27 @@ def panel_principal():
             unsafe_allow_html=True,
         )
     elif state.running:
+        _en_atras  = lineal is not None and lineal.en_marcha_atras
+        _ar_active = state.get("k_auto_reverse", False)
+        _badge_color  = "#ff7b72" if _en_atras else "#3fb950"
+        _badge_bg     = "rgba(255,123,114,0.08)" if _en_atras else "rgba(63,185,80,0.08)"
+        _badge_border = "rgba(255,123,114,0.25)" if _en_atras else "rgba(63,185,80,0.25)"
+        _badge_label  = "&#9660; MARCHA ATRÁS" if _en_atras else "&#9650; EN MARCHA"
+        _ar_suffix = (
+            f"&nbsp;<span style='color:#8b949e;font-weight:400;font-size:0.75rem;letter-spacing:1px'>"
+            f"AUTO-REVERSE · {state.ar_pasadas} inv.</span>"
+            if _ar_active else ""
+        )
         st.markdown(
-            "<div style='display:inline-flex;align-items:center;gap:8px;"
-            "background:rgba(63,185,80,0.08);border:1px solid rgba(63,185,80,0.25);"
-            "border-radius:20px;padding:5px 14px;margin:4px 0'>"
-            "<span style='width:8px;height:8px;border-radius:50%;background:#3fb950;"
-            "display:inline-block;box-shadow:0 0 6px #3fb950'></span>"
-            "<span style='color:#3fb950;font-weight:600;letter-spacing:2px;font-size:0.85rem'>EN MARCHA</span>"
-            "</div>",
+            f"<div style='display:inline-flex;align-items:center;gap:8px;"
+            f"background:{_badge_bg};border:1px solid {_badge_border};"
+            f"border-radius:20px;padding:5px 14px;margin:4px 0'>"
+            f"<span style='width:8px;height:8px;border-radius:50%;background:{_badge_color};"
+            f"display:inline-block;box-shadow:0 0 6px {_badge_color}'></span>"
+            f"<span style='color:{_badge_color};font-weight:600;letter-spacing:2px;font-size:0.85rem'>"
+            f"{_badge_label}</span>"
+            f"{_ar_suffix}"
+            f"</div>",
             unsafe_allow_html=True,
         )
     elif state.paused:
@@ -759,52 +959,104 @@ def panel_principal():
         )
 
     # METRICAS
-    cols_m = st.columns(8)
+    cols_m = st.columns(10)
     if lineal:
         porcentaje  = min(lineal.posicion_norte / longitud_campo * 100.0, 100.0)
         vel_teorica = lineal.velocidad_nominal * lineal.velocidad_porcentaje / 100.0
         vel_real    = state.get("vel_real", 0.0)
         delta_vel   = vel_real - vel_teorica
-        cols_m[0].metric("Tiempo campo",   lineal._tiempo_formateado())
-        cols_m[1].metric("Ciclo",          str(lineal.ciclo_actual))
-        cols_m[2].metric("Posicion media", f"{lineal.posicion_norte:.2f} m")
-        cols_m[3].metric("Recorrido",      f"{porcentaje:.1f} %")
-        cols_m[4].metric("Alineacion",     "OK" if lineal.esta_alineado else "Corrigiendo")
+        cols_m[0].metric("Tiempo campo",    lineal._tiempo_formateado())
+        cols_m[1].metric("Ciclo",           str(lineal.ciclo_actual))
+        cols_m[2].metric("Posición media",  f"{lineal.posicion_norte:.2f} m")
+        cols_m[3].metric("Recorrido",       f"{porcentaje:.1f} %")
+        cols_m[4].metric("Alineación",      "OK" if lineal.esta_alineado else "Corrigiendo")
         cols_m[5].metric("Guia Izq (Cart)", "ON" if lineal.guia_izquierda.contactor.esta_cerrado else "OFF")
-        cols_m[6].metric("End-tower",      "ON" if lineal.guia_derecha.contactor.esta_cerrado else "OFF")
-        cols_m[7].metric("Vel. real",      f"{vel_real:.2f} m/min",
+        cols_m[6].metric("End-tower",       "ON" if lineal.guia_derecha.contactor.esta_cerrado else "OFF")
+        cols_m[7].metric("Vel. real",       f"{vel_real:.2f} m/min",
                           delta=f"{delta_vel:+.2f} vs teórica",
                           delta_color="normal")
+        cols_m[8].metric("Motor ★ activo",  f"{lineal.motor_rapido_pct_on:.0f} %",
+                          help="% del último ciclo completo (60 s sim.) con el motor rápido encendido")
+        cols_m[9].metric("Dirección",
+                          "▼ ATRÁS" if lineal.en_marcha_atras else "▲ ADELANTE",
+                          help="S = alternar marcha atrás / avance normal")
     else:
         for col in cols_m:
             col.metric("—", "—")
 
     # BARRA DE PROGRESO
     if lineal:
-        st.markdown(
-            f"<div style='background:#161b22;border:1px solid #30363d;border-radius:10px;"
-            f"padding:14px 20px 10px 20px;margin:8px 0 16px 0'>"
-            f"<div style='display:flex;justify-content:space-between;align-items:baseline;"
-            f"margin-bottom:10px'>"
-            f"<span style='color:#8b949e;font-size:0.72rem;letter-spacing:2px;"
-            f"text-transform:uppercase;font-family:monospace'>Recorrido del campo</span>"
-            f"<span style='color:#e6edf3;font-size:1.5rem;font-weight:700;font-family:monospace;"
-            f"line-height:1'>{porcentaje:.1f}"
-            f"<span style='color:#8b949e;font-size:0.9rem'>%</span></span>"
-            f"</div>"
-            f"<div style='background:#21262d;border-radius:4px;height:6px;overflow:hidden;"
-            f"margin-bottom:8px'>"
-            f"<div style='background:linear-gradient(90deg,#238636 0%,#3fb950 100%);"
-            f"width:{porcentaje:.2f}%;height:100%;border-radius:4px'></div>"
-            f"</div>"
-            f"<div style='display:flex;justify-content:space-between'>"
-            f"<span style='color:#3fb950;font-size:0.82rem;font-weight:600;font-family:monospace'>"
-            f"{lineal.posicion_norte:.1f} m avanzados</span>"
-            f"<span style='color:#484f58;font-size:0.82rem;font-family:monospace'>"
-            f"meta {longitud_campo:.0f} m</span>"
-            f"</div></div>",
-            unsafe_allow_html=True,
-        )
+        _ar_on_bar  = state.get("k_auto_reverse", False)
+        _ar_ymin_b  = float(state.get("k_ar_ymin", 0))
+        _ar_ymax_b  = float(state.get("k_ar_ymax", longitud_campo))
+
+        if _ar_on_bar:
+            # Barra bidireccional: muestra posición dentro del rango [ymin, ymax]
+            _ar_span      = max(_ar_ymax_b - _ar_ymin_b, 1.0)
+            _pos_clamped  = max(_ar_ymin_b, min(_ar_ymax_b, lineal.posicion_norte))
+            _pct_bar      = (_pos_clamped - _ar_ymin_b) / _ar_span * 100.0
+            # El indicador de "cabeza" es un marcador deslizante en vez de relleno progresivo
+            _bar_color    = "#ff7b72" if lineal.en_marcha_atras else "#3fb950"
+            _dir_arrow    = "▼" if lineal.en_marcha_atras else "▲"
+            _pasadas_txt  = f"{state.ar_pasadas} inversiones"
+            _rango_label  = f"{_ar_ymin_b:.0f} m — {_ar_ymax_b:.0f} m"
+            st.markdown(
+                f"<div style='background:#161b22;border:1px solid #30363d;border-radius:10px;"
+                f"padding:14px 20px 10px 20px;margin:8px 0 16px 0'>"
+                f"<div style='display:flex;justify-content:space-between;align-items:baseline;"
+                f"margin-bottom:10px'>"
+                f"<span style='color:#8b949e;font-size:0.72rem;letter-spacing:2px;"
+                f"text-transform:uppercase;font-family:monospace'>"
+                f"Auto-reverse  ·  {_rango_label}</span>"
+                f"<span style='color:{_bar_color};font-size:1.5rem;font-weight:700;"
+                f"font-family:monospace;line-height:1'>"
+                f"{_dir_arrow}&nbsp;{lineal.posicion_norte:.1f}"
+                f"<span style='color:#8b949e;font-size:0.9rem'> m</span></span>"
+                f"</div>"
+                # Pista de fondo gris + posición del lineal como marcador deslizante
+                f"<div style='position:relative;background:#21262d;border-radius:4px;"
+                f"height:8px;margin-bottom:8px'>"
+                f"<div style='position:absolute;left:0;top:0;"
+                f"background:rgba(63,185,80,0.12);border-radius:4px;"
+                f"width:{_pct_bar:.2f}%;height:100%'></div>"
+                f"<div style='position:absolute;top:-3px;"
+                f"left:calc({_pct_bar:.2f}% - 7px);width:14px;height:14px;"
+                f"border-radius:50%;background:{_bar_color};"
+                f"box-shadow:0 0 6px {_bar_color}'></div>"
+                f"</div>"
+                f"<div style='display:flex;justify-content:space-between'>"
+                f"<span style='color:{_bar_color};font-size:0.82rem;font-weight:600;"
+                f"font-family:monospace'>{_pasadas_txt}</span>"
+                f"<span style='color:#484f58;font-size:0.82rem;font-family:monospace'>"
+                f"rango {_ar_span:.0f} m</span>"
+                f"</div></div>",
+                unsafe_allow_html=True,
+            )
+        else:
+            st.markdown(
+                f"<div style='background:#161b22;border:1px solid #30363d;border-radius:10px;"
+                f"padding:14px 20px 10px 20px;margin:8px 0 16px 0'>"
+                f"<div style='display:flex;justify-content:space-between;align-items:baseline;"
+                f"margin-bottom:10px'>"
+                f"<span style='color:#8b949e;font-size:0.72rem;letter-spacing:2px;"
+                f"text-transform:uppercase;font-family:monospace'>Recorrido del campo</span>"
+                f"<span style='color:#e6edf3;font-size:1.5rem;font-weight:700;font-family:monospace;"
+                f"line-height:1'>{porcentaje:.1f}"
+                f"<span style='color:#8b949e;font-size:0.9rem'>%</span></span>"
+                f"</div>"
+                f"<div style='background:#21262d;border-radius:4px;height:6px;overflow:hidden;"
+                f"margin-bottom:8px'>"
+                f"<div style='background:linear-gradient(90deg,#238636 0%,#3fb950 100%);"
+                f"width:{porcentaje:.2f}%;height:100%;border-radius:4px'></div>"
+                f"</div>"
+                f"<div style='display:flex;justify-content:space-between'>"
+                f"<span style='color:#3fb950;font-size:0.82rem;font-weight:600;font-family:monospace'>"
+                f"{lineal.posicion_norte:.1f} m avanzados</span>"
+                f"<span style='color:#484f58;font-size:0.82rem;font-family:monospace'>"
+                f"meta {longitud_campo:.0f} m</span>"
+                f"</div></div>",
+                unsafe_allow_html=True,
+            )
 
     # METRICAS GPS
     if lineal and lineal.gps:
@@ -880,8 +1132,14 @@ def panel_principal():
         )
     _pos = lineal.posicion_norte if lineal is not None else 0.0
     st.plotly_chart(
-        build_figure(lineal, longitud_campo, _pos, st.session_state.get("k_vista_general", False)),
+        build_figure(
+            lineal, longitud_campo, _pos,
+            st.session_state.get("k_vista_general", False),
+            tower_trails=state.tower_trails,
+            giro_modo=state.giro_modo,
+        ),
         width="stretch",
+        key="campo_pivot",
         config={
             "scrollZoom": True,
             "displayModeBar": True,
@@ -890,5 +1148,64 @@ def panel_principal():
         },
     )
 
+
+# Componente de teclado (bidireccional real, iframe persistente).
+# Devuelve {left, right, reverse} en cada cambio de tecla.
+#   < (mantener) → giro izq  — Cart es pivote, End-tower barre arco
+#   - (mantener) → giro der  — End-tower es pivote, Cart barre arco
+#   R (toggle)   → marcha atrás / avance normal
+_key_giro = _giro_kbd(default=None)
+if isinstance(_key_giro, dict):
+
+    # Marcha atrás (tecla R)
+    _kbd_reverse_now  = _key_giro.get("reverse", False)
+    _kbd_reverse_prev = st.session_state.marcha_atras_kbd
+    if _kbd_reverse_now != _kbd_reverse_prev:
+        st.session_state.marcha_atras_kbd = _kbd_reverse_now
+        if st.session_state.lineal and st.session_state.running:
+            _lin = st.session_state.lineal
+            _lin.invertir_direccion()
+            _dir_txt = "MARCHA ATRÁS activada" if _lin.en_marcha_atras else "Avance normal activado"
+            st.session_state.log.append({
+                "t":    _lin._tiempo_formateado(),
+                "tipo": "INFO",
+                "msg":  _dir_txt,
+            })
+
+    # Giro (teclas < y -): izquierda → Cart pivota, derecha → End-tower pivota
+    _prev = st.session_state.giro_modo
+    _new  = ("der" if _key_giro.get("left")
+             else ("izq" if _key_giro.get("right") else None))
+    if _new != _prev:
+        st.session_state.giro_modo = _new
+        if st.session_state.lineal and st.session_state.running:
+            _lin = st.session_state.lineal
+
+            if _new in ('izq', 'der'):
+                # Guardar posiciones X del carril antes del giro
+                st.session_state.giro_rail_x = (
+                    _lin.torres[0].posicion_x,
+                    _lin.torres[-1].posicion_x,
+                )
+                # Snap al arco: elimina kinks heredados de operación normal
+                _lin.resetear_arco_giro()
+                # Los trails NO se limpian: el historial es continuo (normal + giro + vuelta)
+
+            elif _prev in ('izq', 'der') and _new is None:
+                # Giro terminado: el lineal continúa desde donde el arco dejó las guías.
+                # No se restauran las X — cada guía sigue en su nueva posición y avanza
+                # desde ahí. Solo recalculamos X de intermedios para consistencia.
+                _lin._actualizar_posiciones_x()
+                st.session_state.giro_rail_x = None
+
+            # 'der' = Cart es pivote = lado izquierdo lento (tecla <)
+            # 'izq' = End-tower es pivote = lado derecho lento (tecla -)
+            _lado_txt = "izquierda" if _new == 'der' else ("derecha" if _new == 'izq' else "")
+            st.session_state.log.append({
+                "t":    _lin._tiempo_formateado(),
+                "tipo": "INFO",
+                "msg":  (f"Giro {_lado_txt} activado  (pivota lado {_lado_txt})"
+                         if _new else "Giro detenido — avance normal"),
+            })
 
 panel_principal()
