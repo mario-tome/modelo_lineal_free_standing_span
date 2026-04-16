@@ -356,6 +356,131 @@ class GPS:
                 f" puerto={puerto_txt})")
 
 
+# Gestiona la comunicación bidireccional con la caja de interfaz Arduino (115 200 baud).
+#
+# La caja conecta el gemelo digital con el algoritmo de guiado físico:
+#   PC → Arduino  (1 Hz)  "Lat 415191807 Lon -47151090 Carr 2"  — posición GPS
+#   Arduino → PC  (evento) "SLOW_DOWN_CART_ON/OFF"               — orden de ralentizar Cart
+#                           "SLOW_DOWN_END_TOWER_ON/OFF"          — orden de ralentizar End-tower
+#                           "SAFETY_OK / SAFETY_FAIL"             — estado de seguridad
+#                           "GPS_OK / GPS_FAIL"                   — estado del GPS de la caja
+#
+# carr = calidad RTK reportada: 0 = sin RTK  1 = RTK float  2 = RTK FIX
+class CajaInterfaz:
+
+    BAUDRATE = 115_200
+
+    def __init__(self,
+                 torre,
+                 lat_origen: float,
+                 lon_origen: float,
+                 puerto_serial: str,
+                 carr: int = 2):
+        # torre: torre cuya posición X/Y se convierte a GPS y se envía al Arduino
+        # lat_origen / lon_origen: coordenadas del Cart en el punto de inicio (X=0, Y=0)
+        # puerto_serial: puerto USB del Arduino ('COM3', '/dev/ttyUSB0', …)
+        self.torre         = torre
+        self.lat_origen    = lat_origen
+        self.lon_origen    = lon_origen
+        self.puerto_serial = puerto_serial
+        self.carr          = carr
+
+        # Estado recibido del algoritmo de guiado vía Arduino
+        self.slow_down_cart:      bool = False
+        self.slow_down_end_tower: bool = False
+        self.safety_ok:           bool = True
+        self.gps_ok:              bool = True
+        self.ultimo_mensaje:      str  = ""
+
+        self._activo = False
+        self._hilo   = None
+
+    # Misma conversión X/Y → lat/lon que la clase GPS
+    @property
+    def latitud(self) -> float:
+        return self.lat_origen + (self.torre.posicion_y / GPS._METROS_POR_GRADO_LAT)
+
+    @property
+    def longitud(self) -> float:
+        metros_por_grado_lon = GPS._METROS_POR_GRADO_LAT * math.cos(math.radians(self.lat_origen))
+        return self.lon_origen + (self.torre.posicion_x / metros_por_grado_lon)
+
+    @property
+    def lat_e7(self) -> int:
+        return round(self.latitud * 1e7)
+
+    @property
+    def lon_e7(self) -> int:
+        return round(self.longitud * 1e7)
+
+    def iniciar(self):
+        """Abre el puerto serie y lanza el hilo de comunicación bidireccional."""
+        if not _SERIAL_DISPONIBLE:
+            print("[CajaInterfaz] pyserial no instalado — ejecuta: pip install pyserial")
+            return
+        if self._hilo is not None and self._hilo.is_alive():
+            return
+        self._activo = True
+        self._hilo   = threading.Thread(target=self._bucle, daemon=True)
+        self._hilo.start()
+
+    def detener(self):
+        """Señaliza al hilo de comunicación que se detenga."""
+        self._activo = False
+
+    def _bucle(self):
+        """Hilo único: envía GPS al Arduino cada segundo y procesa los mensajes entrantes."""
+        try:
+            ser = _serial_module.Serial(
+                self.puerto_serial, self.BAUDRATE,
+                timeout=0.1,       # readline() no bloquea más de 100 ms
+                write_timeout=1,
+                rtscts=False, dsrdtr=False, xonxoff=False,
+            )
+        except Exception as e:
+            print(f"[CajaInterfaz] No se pudo abrir {self.puerto_serial}: {e}")
+            return
+
+        ultimo_envio = 0.0
+        while self._activo:
+            ahora = _time.time()
+
+            # Enviar GPS al Arduino cada segundo
+            if ahora - ultimo_envio >= 1.0:
+                trama = f"Lat {self.lat_e7} Lon {self.lon_e7} Carr {self.carr}\n"
+                try:
+                    ser.write(trama.encode("utf-8"))
+                    ser.flush()
+                    ultimo_envio = ahora
+                except Exception as e:
+                    print(f"[CajaInterfaz] Error enviando GPS: {e}")
+                    break
+
+            # Leer y procesar mensajes del Arduino (sin bloqueo, timeout 100 ms)
+            try:
+                linea = ser.readline().decode("utf-8", errors="replace").strip()
+                if linea:
+                    self.ultimo_mensaje = linea
+                    self._procesar(linea)
+            except Exception as e:
+                if self._activo:
+                    print(f"[CajaInterfaz] Error leyendo: {e}")
+                break
+
+        ser.close()
+
+    def _procesar(self, msg: str):
+        """Actualiza el estado interno según el mensaje recibido del Arduino."""
+        if   msg == "SLOW_DOWN_CART_ON":         self.slow_down_cart      = True
+        elif msg == "SLOW_DOWN_CART_OFF":         self.slow_down_cart      = False
+        elif msg == "SLOW_DOWN_END_TOWER_ON":     self.slow_down_end_tower = True
+        elif msg == "SLOW_DOWN_END_TOWER_OFF":    self.slow_down_end_tower = False
+        elif msg == "SAFETY_OK":                  self.safety_ok           = True
+        elif msg == "SAFETY_FAIL":                self.safety_ok           = False
+        elif msg == "GPS_OK":                     self.gps_ok              = True
+        elif msg == "GPS_FAIL":                   self.gps_ok              = False
+
+
 # Orquestador del lineal Free Standing Span (FSS).
 # Gestiona guías (duty cycle), intermedias (alineación), tramo rígido central y modo giro.
 # Comienza PARADO — usar start() para ponerlo en marcha.
@@ -440,8 +565,9 @@ class Lineal:
         # Dirección de marcha:  1 = avance (norte), -1 = marcha atrás (sur)
         self.direccion: int = 1
 
-        # GPS (se asigna después con asignar_gps())
-        self.gps: GPS | None = None
+        # GPS y caja de interfaz (se asignan después con asignar_gps() / asignar_caja())
+        self.gps:            GPS           | None = None
+        self.caja_interfaz:  CajaInterfaz  | None = None
 
 
     def asignar_gps(self,
@@ -462,6 +588,25 @@ class Lineal:
             raise ValueError(f"La torre {indice_torre} no es una Torre_Intermedia")
 
         self.gps = GPS(torre, lat_origen, lon_origen, puerto_serial, baudrate, verbose_consola)
+
+    def asignar_caja(self,
+                     indice_torre: int,
+                     lat_origen: float,
+                     lon_origen: float,
+                     puerto_serial: str,
+                     carr: int = 2):
+        """Conecta la caja de interfaz Arduino a la torre intermedia indicada."""
+        if not (1 <= indice_torre <= self.numero_tramos - 1):
+            raise ValueError(
+                f"indice_torre debe estar entre 1 y {self.numero_tramos - 1}"
+            )
+        self.caja_interfaz = CajaInterfaz(
+            torre         = self.torres[indice_torre],
+            lat_origen    = lat_origen,
+            lon_origen    = lon_origen,
+            puerto_serial = puerto_serial,
+            carr          = carr,
+        )
 
     def start(self):
         """Pone el lineal en marcha."""

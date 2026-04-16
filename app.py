@@ -8,7 +8,7 @@ import pandas as pd
 import streamlit as st
 import streamlit.components.v1 as components
 import plotly.graph_objects as go
-from modelo import Lineal, Torre_Guia, Torre_Intermedia, GPS
+from modelo import Lineal, Torre_Guia, Torre_Intermedia, GPS, CajaInterfaz
 try:
     import serial.tools.list_ports as _list_ports
     _SERIAL_DISPONIBLE = True
@@ -113,6 +113,7 @@ defaults = {
     "giro_rail_x":      None,   # (x_cart, x_end) antes de iniciar giro → se restaura al parar
     "marcha_atras_kbd": False,  # estado del pulsador 'S' — sincronizado con el componente JS
     "ar_pasadas":       0,      # número de inversiones automáticas realizadas (auto-reverse)
+    "caja_slow_prev":   {"cart": False, "end": False, "safety": True},  # estado anterior para detectar cambios
 }
 
 for k, v in defaults.items():
@@ -225,9 +226,32 @@ with st.sidebar:
         )
 
     st.divider()
-    st.markdown("##### GPS")
-    gps_on = st.checkbox("Activar GPS en una torre intermedia", key="k_gps_on", disabled=locked)
+    st.markdown("##### Conexión externa")
+    # Solo una opción activa a la vez: GPS directo o caja de interfaz Arduino
+    st.radio(
+        "Modo de conexión",
+        options=["ninguno", "gps", "caja"],
+        format_func=lambda k: {
+            "ninguno": "Sin conexión",
+            "gps":     "GPS directo  (cable cruzado, 9 600 baud)",
+            "caja":    "Caja de interfaz Arduino  (115 200 baud)",
+        }[k],
+        key="k_conexion_modo",
+        disabled=locked,
+        label_visibility="collapsed",
+    )
+    _modo   = state.get("k_conexion_modo", "ninguno")
+    gps_on  = (_modo == "gps")
+    caja_on = (_modo == "caja")
+
+    _SIN_PUERTO = "— Sin puerto (solo consola) —"
+    if _SERIAL_DISPONIBLE:
+        _puertos_serie = [p.device for p in _list_ports.comports()]
+    else:
+        _puertos_serie = []
+
     if gps_on:
+        # GPS directo: envía LAT:xxx,LON:xxx al otro PC (cable cruzado, 9 600 baud)
         gps_torre = st.selectbox(
             "Torre con el GPS",
             options=list(range(1, tramos)),
@@ -236,30 +260,51 @@ with st.sidebar:
             format_func=lambda i: f"Intermedia {i}",
         )
         c_lat, c_lon = st.columns(2)
-        c_lat.number_input(
-            "Lat. origen (°)", value=40.4168, format="%.4f",
-            key="k_gps_lat", disabled=locked,
-        )
-        c_lon.number_input(
-            "Lon. origen (°)", value=-3.7038, format="%.4f",
-            key="k_gps_lon", disabled=locked,
-        )
-        # Lista los puertos serie disponibles en el dispositivo
-        _SIN_PUERTO = "— Sin puerto (solo consola) —"
-        if _SERIAL_DISPONIBLE:
-            _puertos = [_SIN_PUERTO] + [p.device for p in _list_ports.comports()]
-        else:
-            _puertos = [_SIN_PUERTO]
+        c_lat.number_input("Lat. origen (°)", value=40.4168, format="%.4f",
+                           key="k_gps_lat", disabled=locked)
+        c_lon.number_input("Lon. origen (°)", value=-3.7038, format="%.4f",
+                           key="k_gps_lon", disabled=locked)
         st.markdown('<p style="font-size:0.875rem;margin:0 0 4px 0">Puerto serie</p>',
                     unsafe_allow_html=True)
         c_puerto, c_refresh = st.columns([6, 1])
         with c_puerto:
-            st.selectbox("Puerto serie", options=_puertos, key="k_gps_puerto",
-                         disabled=locked, label_visibility="collapsed")
+            st.selectbox("Puerto serie",
+                         options=[_SIN_PUERTO] + _puertos_serie,
+                         key="k_gps_puerto", disabled=locked, label_visibility="collapsed")
         with c_refresh:
-            if st.button("↺", help="Actualizar lista de puertos",
-                         disabled=locked, width="stretch"):
+            if st.button("↺", help="Actualizar puertos", disabled=locked, width="stretch"):
                 st.rerun()
+
+    if caja_on:
+        # Caja de interfaz: bidireccional con Arduino (envía GPS, recibe slow-down)
+        st.selectbox(
+            "Torre GPS", options=list(range(1, tramos)),
+            key="k_caja_torre", disabled=locked,
+            format_func=lambda i: f"Intermedia {i}",
+            help="Torre cuya posición se envía al Arduino como coordenada GPS.",
+        )
+        # Carr=2 fijo: el gemelo conoce la posición exacta, siempre reportamos RTK FIX
+        st.session_state["k_caja_carr"] = 2
+        c_lat_c, c_lon_c = st.columns(2)
+        c_lat_c.number_input("Lat. origen (°)", value=40.4168, format="%.4f",
+                              key="k_caja_lat", disabled=locked)
+        c_lon_c.number_input("Lon. origen (°)", value=-3.7038, format="%.4f",
+                              key="k_caja_lon", disabled=locked)
+        st.markdown('<p style="font-size:0.875rem;margin:0 0 4px 0">Puerto serie Arduino</p>',
+                    unsafe_allow_html=True)
+        _SIN_CAJA_PUERTO = "— Selecciona puerto —"
+        c_pcaja, c_rcaja = st.columns([6, 1])
+        with c_pcaja:
+            st.selectbox(
+                "Puerto serie caja",
+                options=_puertos_serie if _puertos_serie else [_SIN_CAJA_PUERTO],
+                key="k_caja_puerto", disabled=locked, label_visibility="collapsed",
+            )
+        with c_rcaja:
+            if st.button("↺", help="Actualizar puertos", disabled=locked,
+                         width="stretch", key="btn_ref_caja"):
+                st.rerun()
+        st.caption("Arduino conectado a este PC · cable USB normal · Carr=2 (RTK FIX) fijo")
 
     st.divider()
 
@@ -276,7 +321,8 @@ with st.sidebar:
             )
             state.lineal.start()
             state.log.append({"t": "00h 00m 00s", "tipo": "START", "msg": "Sistema iniciado"})
-            if st.session_state.get("k_gps_on", False):
+            _modo_cx = st.session_state.get("k_conexion_modo", "ninguno")
+            if _modo_cx == "gps":
                 _SIN_PUERTO = "— Sin puerto (solo consola) —"
                 puerto_raw = st.session_state.get("k_gps_puerto", _SIN_PUERTO)
                 puerto = None if (puerto_raw == _SIN_PUERTO) else puerto_raw
@@ -285,15 +331,26 @@ with st.sidebar:
                     lat_origen      = st.session_state.get("k_gps_lat", 40.4168),
                     lon_origen      = st.session_state.get("k_gps_lon", -3.7038),
                     puerto_serial   = puerto,
-                    verbose_consola = (puerto is None),  # sin puerto HW → simula salida serie por consola
+                    verbose_consola = (puerto is None),
                 )
-                # Hilo de fondo: con puerto envía por serie, sin puerto imprime por consola
                 state.lineal.gps.iniciar_transmision_background()
+            if _modo_cx == "caja":
+                _caja_puerto = st.session_state.get("k_caja_puerto", "")
+                if _caja_puerto and _caja_puerto != "— Selecciona puerto —":
+                    state.lineal.asignar_caja(
+                        indice_torre  = st.session_state.get("k_caja_torre", 1),
+                        lat_origen    = st.session_state.get("k_caja_lat", 40.4168),
+                        lon_origen    = st.session_state.get("k_caja_lon", -3.7038),
+                        puerto_serial = _caja_puerto,
+                        carr          = st.session_state.get("k_caja_carr", 2),
+                    )
+                    state.lineal.caja_interfaz.iniciar()
             state.longitud_campo  = campo
             state.running         = True
             state.finished        = False
             state.paused          = False
             state.giro_modo       = None
+            state.caja_slow_prev  = {"cart": False, "end": False, "safety": True}
             state.tower_trails    = [[] for _ in range(len(state.lineal.torres))]
             st.rerun()
 
@@ -302,6 +359,8 @@ with st.sidebar:
             state.lineal.stop()
             if state.lineal.gps:
                 state.lineal.gps.detener_transmision_background()
+            if state.lineal.caja_interfaz:
+                state.lineal.caja_interfaz.detener()
             state.log.append({"t": state.lineal._tiempo_formateado(), "tipo": "STOP",
                                "msg": f"Sistema pausado en {state.lineal.posicion_norte:.2f} m"})
             state.running   = False
@@ -323,6 +382,8 @@ with st.sidebar:
         if bc2.button("RESET", key="btn_reset", width="stretch"):
             if state.lineal and state.lineal.gps:
                 state.lineal.gps.detener_transmision_background()
+            if state.lineal and state.lineal.caja_interfaz:
+                state.lineal.caja_interfaz.detener()
             for k, v in defaults.items():
                 state[k] = v
             st.rerun()
@@ -331,6 +392,8 @@ with st.sidebar:
         if st.button("REINICIAR", key="btn_reiniciar", type="primary", width="stretch"):
             if state.lineal and state.lineal.gps:
                 state.lineal.gps.detener_transmision_background()
+            if state.lineal and state.lineal.caja_interfaz:
+                state.lineal.caja_interfaz.detener()
             for k, v in defaults.items():
                 state[k] = v
             st.rerun()
@@ -787,6 +850,59 @@ def panel_principal():
         lineal.guia_izquierda.ruido_lateral = _ruido_live
         lineal.guia_derecha.ruido_lateral   = _ruido_live
 
+    # Caja de interfaz: sincroniza giro_modo con los comandos del algoritmo de guiado
+    if state.running and lineal is not None and lineal.caja_interfaz:
+        caja  = lineal.caja_interfaz
+        prev  = state.caja_slow_prev
+
+        # Detectar cambios y registrarlos en el log
+        if caja.slow_down_cart != prev["cart"]:
+            prev["cart"] = caja.slow_down_cart
+            state.log.append({
+                "t": lineal._tiempo_formateado(), "tipo": "INFO",
+                "msg": ("SLOW_DOWN_CART ON — giro izquierda activado"
+                        if caja.slow_down_cart else "SLOW_DOWN_CART OFF — Cart liberado"),
+            })
+        if caja.slow_down_end_tower != prev["end"]:
+            prev["end"] = caja.slow_down_end_tower
+            state.log.append({
+                "t": lineal._tiempo_formateado(), "tipo": "INFO",
+                "msg": ("SLOW_DOWN_END_TOWER ON — giro derecha activado"
+                        if caja.slow_down_end_tower else "SLOW_DOWN_END_TOWER OFF — End-tower liberado"),
+            })
+
+        if not caja.safety_ok and prev["safety"]:
+            prev["safety"] = False
+            lineal.stop()
+            state.log.append({
+                "t": lineal._tiempo_formateado(), "tipo": "CRIT",
+                "msg": "SAFETY_FAIL — parada de emergencia",
+            })
+            state.running = False
+            state.paused  = True
+        elif caja.safety_ok and not prev["safety"]:
+            prev["safety"] = True
+            state.log.append({
+                "t": lineal._tiempo_formateado(), "tipo": "OK",
+                "msg": "SAFETY_OK — seguridad restaurada (reanuda manualmente)",
+            })
+
+        # Calcular nuevo giro y aplicar si cambió
+        _nuevo_giro = ('der' if caja.slow_down_cart and not caja.slow_down_end_tower
+                       else ('izq' if caja.slow_down_end_tower and not caja.slow_down_cart
+                             else None))
+        if _nuevo_giro != state.giro_modo:
+            _prev_giro = state.giro_modo
+            state.giro_modo = _nuevo_giro
+            if _nuevo_giro in ('izq', 'der'):
+                # Guardar rail y alinear intermedias antes del giro
+                state.giro_rail_x = (lineal.torres[0].posicion_x, lineal.torres[-1].posicion_x)
+                lineal.resetear_arco_giro()
+            elif _prev_giro in ('izq', 'der'):
+                # Giro terminado: recalcular X de intermedias
+                lineal._actualizar_posiciones_x()
+                state.giro_rail_x = None
+
     # Avance de simulacion
     if state.running and not state.finished and lineal is not None:
         sim_spd_val = state.get("k_simspd", 60)
@@ -1076,6 +1192,41 @@ def panel_principal():
                      delta=f"{delta_lon:+.7f}°" if delta_lon is not None else None)
         cg[3].metric("Formato ×10⁷", f"{gps.lat_e7}  /  {gps.lon_e7}")
         state.gps_prev = {"lat": ui_lat, "lon": ui_lon}
+
+    # CAJA DE INTERFAZ — estado en tiempo real
+    if lineal and lineal.caja_interfaz:
+        caja    = lineal.caja_interfaz
+        caja_idx = lineal.torres.index(caja.torre)
+        # Colores de estado: verde = OK / activo, rojo = FAIL / activo
+        _c_safe = "#3fb950" if caja.safety_ok else "#f85149"
+        _c_gps  = "#3fb950" if caja.gps_ok    else "#f85149"
+        _c_cart = "#ffa657" if caja.slow_down_cart      else "#484f58"
+        _c_end  = "#ffa657" if caja.slow_down_end_tower else "#484f58"
+        cc = st.columns(6)
+        cc[0].metric("Caja · Torre GPS",    f"Intermedia {caja_idx}")
+        cc[1].metric("GPS enviado",
+                     f"{caja.lat_e7} / {caja.lon_e7}",
+                     help=f"{caja.latitud:.7f}°  {caja.longitud:.7f}°  Carr {caja.carr}")
+        cc[2].metric("Safety",     "OK" if caja.safety_ok else "FAIL")
+        cc[3].metric("GPS status", "OK" if caja.gps_ok    else "FAIL")
+        cc[4].metric("Slow Cart",  "ON" if caja.slow_down_cart      else "—")
+        cc[5].metric("Slow EndT",  "ON" if caja.slow_down_end_tower else "—")
+        # Colorear los estados con CSS inline
+        st.markdown(
+            f"<div style='display:flex;gap:8px;margin:-12px 0 8px 0;flex-wrap:wrap'>"
+            f"<span style='font-size:0.72rem;color:{_c_safe};font-family:monospace'>"
+            f"&#9679; SAFETY {'OK' if caja.safety_ok else 'FAIL'}</span>"
+            f"<span style='font-size:0.72rem;color:{_c_gps};font-family:monospace'>"
+            f"&#9679; GPS {'OK' if caja.gps_ok else 'FAIL'}</span>"
+            f"<span style='font-size:0.72rem;color:{_c_cart};font-family:monospace'>"
+            f"&#9679; SLOW_CART {'ON' if caja.slow_down_cart else 'OFF'}</span>"
+            f"<span style='font-size:0.72rem;color:{_c_end};font-family:monospace'>"
+            f"&#9679; SLOW_END_TWR {'ON' if caja.slow_down_end_tower else 'OFF'}</span>"
+            f"<span style='font-size:0.72rem;color:#484f58;font-family:monospace'>"
+            f"último msg: {caja.ultimo_mensaje or '—'}</span>"
+            f"</div>",
+            unsafe_allow_html=True,
+        )
 
     # FILA COMPACTA: CSV · LOG · GPS TRACK  (encima del campo, sin scroll)
     if lineal:

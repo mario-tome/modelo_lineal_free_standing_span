@@ -1,59 +1,90 @@
 """
-GPS RECEIVER — ejecutar en el Mac receptor
-Escucha el puerto serie y muestra las coordenadas GPS del lineal en tiempo real.
+Monitor serie para macOS/Linux.
 
-Uso en Mac:
-    python gps_receiver.py /dev/tty.usbserial-XXXX
+Sirve para dos setups distintos:
 
-Para saber el nombre exacto del puerto en Mac, ejecuta primero:
+  SETUP A — GPS directo (sin Arduino, cable USB cruzado a otro PC):
+      python gps_receiver_macOS.py /dev/tty.usbserial-XXXX 9600
+      Formato recibido: LAT:415191807,LON:-47151090
+
+  SETUP B — Caja de interfaz Arduino:
+      python gps_receiver_macOS.py /dev/tty.usbserial-XXXX 115200
+      Formato recibido: Lat 415191807 Lon -47151090 Carr 2   (PC → Arduino)
+                        SLOW_DOWN_CART_ON / SAFETY_OK / ...  (Arduino → PC)
+
+Para listar los puertos:
     ls /dev/tty.usb*
+
+Requisito:
+    pip install pyserial
 """
 
 import serial
 import sys
 
 PUERTO   = sys.argv[1] if len(sys.argv) > 1 else "/dev/tty.usbserial-0001"
-BAUDRATE = 9600
+BAUDRATE = int(sys.argv[2]) if len(sys.argv) > 2 else 9600
 
 
 def parsear(linea: str):
-    """Extrae lat y lon del mensaje LAT:XXXXXXX,LON:YYYYYYY y los convierte a grados."""
-    try:
-        partes = dict(p.split(":") for p in linea.strip().split(","))
-        lat_e7 = int(partes["LAT"])
-        lon_e7 = int(partes["LON"])
-        return lat_e7 / 1e7, lon_e7 / 1e7
-    except Exception:
-        return None, None
+    """
+    Intenta interpretar la línea como trama GPS.
+    Soporta dos formatos:
+      - "LAT:415191807,LON:-47151090"        (GPS class, Setup A)
+      - "Lat 415191807 Lon -47151090 Carr 2" (CajaInterfaz, Setup B)
+    Devuelve (lat, lon, carr_o_None) o None si no es GPS.
+    """
+    linea = linea.strip()
+
+    # Formato nuevo: "Lat xxx Lon xxx Carr x"
+    partes = linea.split()
+    if len(partes) == 6 and partes[0] == "Lat" and partes[2] == "Lon" and partes[4] == "Carr":
+        try:
+            return int(partes[1]) / 1e7, int(partes[3]) / 1e7, int(partes[5])
+        except ValueError:
+            pass
+
+    # Formato antiguo: "LAT:xxx,LON:xxx"
+    if "LAT:" in linea and "LON:" in linea:
+        try:
+            campos = dict(p.split(":") for p in linea.split(","))
+            return int(campos["LAT"]) / 1e7, int(campos["LON"]) / 1e7, None
+        except Exception:
+            pass
+
+    return None
+
+
+_CARR_DESC = {0: "sin RTK", 1: "RTK float", 2: "RTK FIX"}
 
 
 def main():
     print(f"Abriendo {PUERTO} a {BAUDRATE} baudios...")
     try:
-        ser = serial.Serial(
-            PUERTO, BAUDRATE,
-            timeout=2, rtscts=False, dsrdtr=False, xonxoff=False,
-        )
+        ser = serial.Serial(PUERTO, BAUDRATE, timeout=2,
+                            rtscts=False, dsrdtr=False, xonxoff=False)
     except serial.SerialException as e:
         print(f"ERROR: {e}")
-        print("\nPuertos disponibles en Mac — ejecuta en otra terminal:")
-        print("    ls /dev/tty.usb*")
         sys.exit(1)
 
-    print(f"Conectado. Esperando coordenadas GPS del lineal...\n")
-    print(f"{'Mensaje raw':<35}  {'Latitud':>14}  {'Longitud':>14}")
-    print("-" * 68)
+    print(f"Conectado. Esperando datos...\n")
+    print(f"{'Tipo':<12}  {'Contenido'}")
+    print("-" * 70)
 
     try:
         while True:
             linea = ser.readline().decode("utf-8", errors="replace").strip()
             if not linea:
                 continue
-            lat, lon = parsear(linea)
-            if lat is not None:
-                print(f"{linea:<35}  {lat:>14.7f}°  {lon:>14.7f}°")
+
+            gps = parsear(linea)
+            if gps:
+                lat, lon, carr = gps
+                carr_txt = f"  [{_CARR_DESC[carr]}]" if carr is not None else ""
+                print(f"{'GPS':<12}  {lat:>13.7f}°  {lon:>13.7f}°{carr_txt}")
             else:
-                print(f"[msg desconocido] {linea}")
+                # Mensaje de estado del Arduino (SLOW_DOWN_CART_ON, SAFETY_OK, ...)
+                print(f"{'Arduino →':<12}  {linea}")
     except KeyboardInterrupt:
         print("\nDetenido.")
     finally:
