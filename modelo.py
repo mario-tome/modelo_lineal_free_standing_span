@@ -7,21 +7,16 @@ except ImportError:
     _SERIAL_DISPONIBLE = False
 
 
-#  CONTACTOR
-#  Conecta y desconecta el motor de una torre
-#  Hay DOS formas de usarlo según el tipo de torre:
-#
-#  1. duty cycle (torres guía): el motor arranca y para en ciclos de 60 s para controlar la velocidad media
-#  2. alineación (torres intermedias, no hay duty cycle): indicador de alineación: ON cuando la torre está desalineada con su líder, OFF cuando está alineada
+# Conecta/desconecta el motor de una torre.
+# Torres guía: modo duty cycle (ciclos ON/OFF de 60 s para controlar la velocidad media).
+# Torres intermedias: indicador de alineación (ON = desalineada, OFF = alineada).
 class Contactor:
 
     CERRADO = "CERRADO"   # Motor ON
     ABIERTO  = "ABIERTO"  # Motor OFF
 
     def __init__(self, velocidad_porcentaje: float = 0.0):
-        """
-        velocidad_porcentaje : duty cycle en % (solo relevante en torres guía)
-        """
+        """velocidad_porcentaje: duty cycle en % (solo relevante en torres guía)"""
         self.duty_cycle = velocidad_porcentaje / 100.0
         self.estado     = self.ABIERTO
 
@@ -31,13 +26,12 @@ class Contactor:
         tiempo_activo = self.duty_cycle * duracion_ciclo
         self.estado   = self.CERRADO if segundo_en_ciclo < tiempo_activo else self.ABIERTO
 
-    # Uso en torres intermedias
     def cerrar(self):
-        """Motor ON: torre desalineada, activando recuperación de posición"""
+        """Motor ON: torre desalineada, recuperando posición."""
         self.estado = self.CERRADO
 
     def abrir(self):
-        """Motor OFF: torre alineada con su líder"""
+        """Motor OFF: torre alineada."""
         self.estado = self.ABIERTO
 
     @property
@@ -48,36 +42,29 @@ class Contactor:
         return f"Contactor(duty={self.duty_cycle * 100:.0f}%, estado={self.estado})"
 
 
-#  TORRE (clase base)
-#  Posición X : fija durante toda la simulación (posición a lo ancho)
-#  Posición Y : avanza hacia el norte cuando el motor está en marcha
-#
-#  El patinaje simula irregularidades del terreno (cada torre tiene su propio valor)
+# Torre base: X fija (posición lateral), Y avanza al norte cuando el motor está ON.
+# Cada torre tiene un porcentaje de patinaje aleatorio que simula irregularidades del terreno.
 class Torre:
 
     def __init__(self, posicion_x: float, posicion_y: float,
                  longitud_tramo: float, velocidad_nominal: float = 3.0):
-        """
-        posicion_x      : posición fija en el eje X (metros)
-        posicion_y      : posición inicial en el eje Y / norte (metros)
-        longitud_tramo  : longitud del tramo que parte de esta torre (metros)
-        velocidad_nominal: velocidad de avance cuando el motor está ON (m/min)
-        """
         self.posicion_x        = posicion_x
         self.posicion_y        = posicion_y
         self.longitud_tramo    = longitud_tramo
         self.velocidad_nominal = velocidad_nominal
         self.porcentaje_patinaje = random.uniform(0.0, 5.0)  # imperfección única por torre
 
-    def avanzar(self, segundos: float) -> float:
+    def avanzar(self, segundos: float, direccion: int = 1) -> float:
         """
-        Mueve la torre hacia el norte durante 'segundos' a velocidad nominal
-        El patinaje reduce ligeramente la velocidad según el terreno
-        Devuelve los metros avanzados
+        Mueve la torre durante 'segundos' a velocidad nominal.
+        direccion =  1 → hacia el norte (avance normal)
+        direccion = -1 → hacia el sur   (marcha atrás)
+        El patinaje reduce ligeramente la velocidad según el terreno.
+        Devuelve los metros recorridos (positivo siempre; el signo lo da direccion).
         """
         factor_patinaje  = 1.0 - (self.porcentaje_patinaje / 100.0) * random.uniform(0.5, 1.0)
         metros_avanzados = self.velocidad_nominal * (segundos / 60.0) * factor_patinaje
-        self.posicion_y += metros_avanzados
+        self.posicion_y += metros_avanzados * direccion
         return metros_avanzados
 
     @property
@@ -88,34 +75,23 @@ class Torre:
         return f"{self.__class__.__name__}(x={self.posicion_x:.0f}m, y={self.posicion_y:.3f}m)"
 
 
-#  TORRE_GUIA
-#  Las dos torres de los extremos del lineal: izquierda (Cart) y derecha (Guía)
-#
-#  Son las únicas con contactor de DUTY CYCLE
-#  El motor arranca y para en ciclos de 60 s: esto controla la velocidad media de avance de todo el lineal.
+# Torres de los extremos: Cart (izquierda) y End-tower (derecha).
+# Son las únicas con contactor de duty cycle — su ciclo ON/OFF marca el ritmo de avance de todo el lineal.
 class Torre_Guia(Torre):
 
     def __init__(self, posicion_x: float, posicion_y: float,
                  longitud_tramo: float, velocidad_nominal: float = 3.0,
                  velocidad_porcentaje: float = 50.0,
                  ruido_lateral: float = 0.0):
-        """
-        ruido_lateral : desviación típica de la deriva lateral por metro avanzado.
-                        Modela irregularidades del terreno (paseo aleatorio en X).
-                        0.000 → terreno perfecto
-                        0.006 → terreno suave  (~3 cm en 800 m)
-                        0.012 → terreno normal (~6 cm en 800 m)
-                        0.030 → terreno irregular (~15 cm en 800 m)
-                        0.070 → lineal loco (~35 cm en 800 m)
-        """
+        # ruido_lateral: deriva lateral aleatoria por metro avanzado (0=perfecto, 0.070=loco)
         super().__init__(posicion_x, posicion_y, longitud_tramo, velocidad_nominal)
         self.contactor     = Contactor(velocidad_porcentaje)
         self.ruido_lateral = ruido_lateral
 
-    def avanzar(self, segundos: float) -> float:
-        """Avanza en Y cuando el contactor está CERRADO; acumula ruido lateral si hay terreno."""
+    def avanzar(self, segundos: float, direccion: int = 1) -> float:
+        """Avanza (o retrocede) si el contactor está cerrado. Aplica ruido lateral del terreno."""
         if self.contactor.esta_cerrado:
-            metros = super().avanzar(segundos)
+            metros = super().avanzar(segundos, direccion)
             if self.ruido_lateral > 0.0 and metros > 0.0:
                 self.posicion_x += random.gauss(0.0, self.ruido_lateral * metros)
             return metros
@@ -127,27 +103,19 @@ class Torre_Guia(Torre):
                 f" contactor={self.contactor.estado}){ruido_txt}")
 
 
-#  TORRE_INTERMEDIA
-#  Su contactor NO tiene duty cycle: es un indicador de alineación ON/OFF.
-#    - ABIERTO (OFF) → torre alineada con su líder inmediato, motor parado
-#    - CERRADO (ON)  → torre desalineada, motor activo para recuperar posición
-#
-#  Su motor es más potente que el de las torres guía para recuperar posición rápido.
-#
-#  La torre en el extremo DERECHO del tramo rígido tiene el motor MÁS RÁPIDO de todo el lineal, 
-#  porque al corregir la rotación del tramo rígido debe recorrer más distancia angular en el mismo tiempo
+# Torres intermedias: contactor de alineación ON/OFF (sin duty cycle).
+# ON = desalineada, motor activo recuperando posición. OFF = alineada, motor parado.
+# La del extremo derecho del tramo rígido tiene motor más rápido (cubre más ángulo en el mismo tiempo).
 class Torre_Intermedia(Torre):
 
     FACTOR_SOBREVELOCIDAD        = 1.5   # motor intermedio normal: ×1.5 la velocidad nominal
     FACTOR_SOBREVELOCIDAD_RAPIDA = 2.0   # motor rápido (extremo der. tramo rígido): ×2.0
-    UMBRAL_ARRANQUE              = 0.15  # desalineación mínima (metros) para activar el motor
+    UMBRAL_ARRANQUE              = 0.30  # desalineación mínima (metros) para activar el motor
 
     def __init__(self, posicion_x: float, posicion_y: float,
                  longitud_tramo: float, velocidad_nominal: float = 3.0,
                  es_motor_rapido: bool = False):
-        """
-        es_motor_rapido : True únicamente para la torre del extremo derecho del tramo rígido
-        """
+        # es_motor_rapido: True solo para la torre del extremo derecho del tramo rígido
         super().__init__(posicion_x, posicion_y, longitud_tramo, velocidad_nominal)
         self.contactor      = Contactor()   # contactor de alineación (sin duty cycle)
         self.es_motor_rapido = es_motor_rapido
@@ -158,30 +126,48 @@ class Torre_Intermedia(Torre):
                 if self.es_motor_rapido
                 else self.FACTOR_SOBREVELOCIDAD)
 
-    def seguir(self, posicion_y_lider: float, segundos: float) -> float:
+    def seguir(self, y_izq: float, y_der: float, segundos: float,
+               direccion: int = 1) -> float:
         """
-        Avanza hacia la posición Y de su torre líder inmediata (la torre de su izquierda)
-
-        El contactor (indicador de alineación) se gestiona aquí:
-          diferencia < UMBRAL_ARRANQUE = contactor ABIERTO, motor parado
-          diferencia ≥ UMBRAL_ARRANQUE = contactor CERRADO, motor activo a sobrevelocidad
-
-        Nunca retrocede ni supera la posición del líder
-        Devuelve los metros avanzados.
+        Sigue al vecino más adelantado (avance) o más retrasado (marcha atrás).
+        Se activa cuando la desviación supera UMBRAL_ARRANQUE. Nunca sobrepasa al vecino.
         """
-        diferencia = posicion_y_lider - self.posicion_y
+        # Multiplicar por direccion invierte el sentido del gap en marcha atrás
+        gap_izq = (y_izq - self.posicion_y) * direccion
+        gap_der = (y_der - self.posicion_y) * direccion
+        desviacion = max(gap_izq, gap_der)
 
-        if diferencia < self.UMBRAL_ARRANQUE:
+        if desviacion < self.UMBRAL_ARRANQUE:
             self.contactor.abrir()
             return 0.0
 
         self.contactor.cerrar()
-        factor_patinaje       = 1.0 - (self.porcentaje_patinaje / 100.0) * random.uniform(0.5, 1.0)
+        factor_patinaje        = 1.0 - (self.porcentaje_patinaje / 100.0) * random.uniform(0.5, 1.0)
+        velocidad_recuperacion = self.velocidad_nominal * self.factor_sobrevelocidad
+        capacidad_por_segundo  = velocidad_recuperacion * (segundos / 60.0) * factor_patinaje
+        metros_avanzados       = min(desviacion, capacidad_por_segundo)
+
+        self.posicion_y += metros_avanzados * direccion
+        return metros_avanzados
+
+    def seguir_arco(self, y_objetivo: float, segundos: float,
+                    direccion: int = 1) -> float:
+        """
+        Modo giro: persigue la posición interpolada en el arco sin umbral de activación.
+        Funciona hacia el norte (avance) o hacia el sur (marcha atrás) según direccion.
+        """
+        diferencia = (y_objetivo - self.posicion_y) * direccion
+        if diferencia <= 0.005:          # ya en posición → motor parado
+            self.contactor.abrir()
+            return 0.0
+
+        self.contactor.cerrar()
+        factor_patinaje        = 1.0 - (self.porcentaje_patinaje / 100.0) * random.uniform(0.5, 1.0)
         velocidad_recuperacion = self.velocidad_nominal * self.factor_sobrevelocidad
         capacidad_por_segundo  = velocidad_recuperacion * (segundos / 60.0) * factor_patinaje
         metros_avanzados       = min(diferencia, capacidad_por_segundo)
 
-        self.posicion_y += metros_avanzados
+        self.posicion_y += metros_avanzados * direccion
         return metros_avanzados
 
     def __repr__(self):
@@ -190,14 +176,8 @@ class Torre_Intermedia(Torre):
                 f" contactor={self.contactor.estado}){rapido_txt}")
 
 
-#  TRAMO
-#  Mide la inclinación respecto al eje horizontal
-#    0°  : tramo perpendicular al avance → lineal perfectamente alineado
-#    +X° : torre derecha más adelantada al norte
-#    -X° → torre izquierda más adelantada al norte
-#
-#  es_rigido : True en el tramo central (Free Standing Span).
-#              Este tramo no puede doblarse: sus dos torres se mueven como un bloque.
+# Segmento entre dos torres. Mide su ángulo e inclinación (0° = perfectamente alineado).
+# El tramo rígido central (Free Standing Span) no puede doblarse: sus torres se mueven como un bloque.
 class Tramo:
 
     TOLERANCIA_ALINEACION = 0.05  # diferencia máxima para considerarse alineado (metros)
@@ -215,12 +195,7 @@ class Tramo:
 
     @property
     def desviacion_norte(self) -> float:
-        """
-        Diferencia en Y entre torre derecha e izquierda
-          0.0 → alineado
-          > 0 → torre derecha más adelantada
-          < 0 → torre izquierda más adelantada
-        """
+        """Diferencia en Y entre torre derecha e izquierda (0 = alineado, + = derecha adelantada)."""
         return self.torre_derecha.posicion_y - self.torre_izquierda.posicion_y
 
     @property
@@ -243,18 +218,10 @@ class Tramo:
                 f" angulo={self.angulo_grados:+.3f}grd){rigido_txt}")
 
 
-#  GPS
-#  Unidad GPS asignada a una Torre_Intermedia
-#
-#  Convierte la posición X/Y del modelo (metros) a coordenadas reales lat/lon usando el punto de origen del campo 
-#  (X=0, Y=0 = posición inicial del Cart) como referencia geográfica.
-#
-#  Las coordenadas se emiten en formato entero ×10⁷:
-#    latitud  40.1234567° → 401234567
-#    longitud -3.9876543° → -39876543
-#
-#  La transmisión se realiza cada segundo de simulación a través de puerto USB-serie
-#  Si no hay puerto configurado, los datos se imprimen en consola (modo simulación)
+# GPS virtual asignado a una Torre_Intermedia.
+# Convierte X/Y (metros) a lat/lon reales usando el Cart como origen geográfico.
+# Emite coordenadas como enteros ×10⁷ (ej. 40.1234567° → 401234567) por puerto serie cada segundo.
+# Sin puerto configurado puede imprimir por consola para depuración.
 class GPS:
 
     # 1 grado de latitud ≈ 111 320 m
@@ -267,16 +234,9 @@ class GPS:
                  puerto_serial: str = None,
                  baudrate: int = 9600,
                  verbose_consola: bool = False):
-        """
-        torre            : Torre_Intermedia a la que está físicamente fijado el GPS
-        lat_origen       : latitud  del punto X=0, Y=0 del lineal (grados decimales), es la coordenada GPS real de donde está el Cart al iniciar
-        lon_origen       : longitud del punto X=0, Y=0 del lineal (grados decimales)
-        puerto_serial    : nombre del puerto USB-serie (ej. 'COM3', '/dev/ttyUSB0')
-                           None = sin hardware (solo transmite si verbose_consola=True)
-        baudrate         : velocidad del puerto serie (debe coincidir con el receptor)
-        verbose_consola  : True → imprime coordenadas por consola cuando no hay puerto serie
-                           False (defecto) → silencioso, útil cuando la UI ya muestra los datos
-        """
+        # lat/lon_origen: coordenadas GPS reales del Cart al inicio (X=0, Y=0)
+        # puerto_serial: 'COM3', '/dev/ttyUSB0', etc. None = sin hardware
+        # verbose_consola: imprime coordenadas por consola cuando no hay puerto serie
         self.torre            = torre
         self.lat_origen       = lat_origen
         self.lon_origen       = lon_origen
@@ -332,12 +292,8 @@ class GPS:
         if self._conexion and self._conexion.is_open:
             self._conexion.close()
 
-    # Transmisión en hilo de fondo (para uso con Streamlit y evitar bloquear la UI)
     def iniciar_transmision_background(self):
-        """Lanza un hilo daemon que transmite la posición 1 vez/segundo real.
-        Si hay puerto serie → envía por USB.
-        Si no hay puerto pero verbose_consola=True → imprime por consola.
-        Si ya hay un hilo activo no lanza uno nuevo."""
+        """Lanza un hilo en segundo plano que transmite la posición 1 vez/segundo real."""
         if self.puerto_serial is None and not self.verbose_consola:
             return   # nada que hacer: ni puerto ni consola
         if self._hilo is not None and self._hilo.is_alive():
@@ -351,9 +307,7 @@ class GPS:
         self._activo = False
 
     def _bucle_transmision(self):
-        """Hilo interno: transmite coordenadas cada segundo real.
-        Con puerto serie: escribe por USB.
-        Sin puerto (verbose_consola=True): imprime por consola."""
+        """Bucle del hilo de transmisión: envía por USB o imprime por consola cada segundo."""
         conexion = None
         if self.puerto_serial is not None:
             try:
@@ -383,13 +337,7 @@ class GPS:
             conexion.close()
 
     def transmitir(self):
-        """
-        Envía la posición actual de la torre.
-        Formato: LAT:<lat_e7>,LON:<lon_e7>\\n
-
-        Con puerto serie configurado: transmite siempre por USB.
-        Sin puerto serie: imprime por consola solo si verbose_consola=True.
-        """
+        """Envía la posición actual por USB (o consola si verbose). Formato: LAT:xxx,LON:xxx"""
         mensaje = f"LAT:{self.lat_e7},LON:{self.lon_e7}\n"
 
         if self._abrir_puerto():
@@ -408,20 +356,9 @@ class GPS:
                 f" puerto={puerto_txt})")
 
 
-#  LINEAL Free Standing Span
-#  Torres Guía (extremos)
-#    - Tienen contactor de duty cycle: marcan el ritmo de avance de todo el lineal
-#    - Ambas guías tienen el mismo duty cycle y avanzan a la misma velocidad media
-#
-#  Torres Intermedias
-#    - Contactor de alineación ON/OFF: se activa cuando la torre se queda atrás
-#    - Motor más potente que las guías para recuperar posición
-#    - La torre en el extremo derecho del tramo rígido tiene el motor más rápido de todos
-#
-#  Tramo Rígido (central)
-#    - No se puede doblar: las torres de sus extremos se mueven como un bloque
-#
-#  El lineal comienza PARADO. Usar start() para ponerlo en marcha
+# Orquestador del lineal Free Standing Span (FSS).
+# Gestiona guías (duty cycle), intermedias (alineación), tramo rígido central y modo giro.
+# Comienza PARADO — usar start() para ponerlo en marcha.
 class Lineal:
     DURACION_CICLO = 60  # segundos por ciclo de duty cycle de las torres guía
 
@@ -431,23 +368,9 @@ class Lineal:
                  velocidad_porcentaje: float = 50.0,
                  velocidad_nominal: float    = 3.0,
                  ruido_lateral: float        = 0.0):
-        """
-        numero_tramos        : número de tramos del lineal (mínimo 3)
-                               Torres totales = numero_tramos + 1
-                               1 guía izquierda + (numero_tramos - 1) intermedias + 1 guía derecha
-
-        longitud_tramo       : longitud de cada tramo en metros
-
-        velocidad_porcentaje : duty cycle de las torres guía en %
-                               % del tiempo que el motor de las guías está ON en cada ciclo de 60 s
-                               Velocidad media = velocidad_nominal × (velocidad_porcentaje / 100)
-
-        velocidad_nominal    : velocidad de avance de cualquier motor cuando está ON (m/min)
-
-        ruido_lateral        : desviación típica de deriva lateral por metro avanzado en cada torre guía.
-                               Se propaga a ambas guías con ruido independiente (terreno distinto en cada extremo).
-                               Ver Torre_Guia para la tabla de valores orientativos.
-        """
+        # numero_tramos: mínimo 3 (torres totales = numero_tramos + 1)
+        # velocidad_porcentaje: duty cycle de las guías — velocidad media = nominal × (pct/100)
+        # ruido_lateral: deriva lateral por metro avanzado (0 = sin ruido)
         if numero_tramos < 3:
             raise ValueError(
                 "El lineal Free Standing Span necesita mínimo 3 tramos"
@@ -464,10 +387,7 @@ class Lineal:
         # Torre más rápida: extremo DERECHO del tramo rígido
         self.indice_torre_motor_rapido = self.indice_tramo_rigido + 1
 
-        # Crear torres
-        # Índice 0             : Torre Guía izquierda (Cart)
-        # Índices 1..N-1       : Torres Intermedias
-        # Índice N             : Torre Guía derecha
+        # torres[0] = Cart (izq), torres[1..N-1] = intermedias, torres[N] = End-tower (der)
         self.torres = []
 
         self.torres.append(Torre_Guia(
@@ -514,11 +434,16 @@ class Lineal:
         self._segundo_en_ciclo     = 0
         self._en_marcha            = False   # el lineal comienza PARADO
 
+        self._mr_on_en_ciclo      = 0      # segundos ON del motor rápido en el ciclo actual
+        self.motor_rapido_pct_on  = 0.0   # % ON del motor rápido en el último ciclo completo
+
+        # Dirección de marcha:  1 = avance (norte), -1 = marcha atrás (sur)
+        self.direccion: int = 1
+
         # GPS (se asigna después con asignar_gps())
         self.gps: GPS | None = None
 
 
-    # GPS
     def asignar_gps(self,
                     indice_torre: int,
                     lat_origen: float,
@@ -526,15 +451,7 @@ class Lineal:
                     puerto_serial: str = None,
                     baudrate: int = 9600,
                     verbose_consola: bool = False):
-        """
-        Asigna una unidad GPS a una torre intermedia del lineal
-
-        indice_torre  : índice de la torre intermedia (entre 1 y numero_tramos-1 inclusive)
-        lat_origen    : latitud  real del punto X=0, Y=0 del lineal (grados decimales)
-        lon_origen    : longitud real del punto X=0, Y=0 del lineal (grados decimales)
-        puerto_serial : puerto USB-serie (ej. 'COM3'). None = solo consola
-        baudrate      : velocidad del puerto serie (debe coincidir con el receptor)
-        """
+        """Asigna un GPS a la torre intermedia indicada (indice entre 1 y N-1)."""
         if not (1 <= indice_torre <= self.numero_tramos - 1):
             raise ValueError(
                 f"indice_torre debe estar entre 1 y {self.numero_tramos - 1} "
@@ -546,20 +463,24 @@ class Lineal:
 
         self.gps = GPS(torre, lat_origen, lon_origen, puerto_serial, baudrate, verbose_consola)
 
-    # Control del lineal
     def start(self):
-        """Pone el lineal en marcha"""
+        """Pone el lineal en marcha."""
         self._en_marcha = True
 
     def stop(self):
-        """
-        Detiene el lineal
-        Las torres guía abren su contactor (motor OFF)
-        El tiempo sigue corriendo pero ninguna torre avanza
-        """
+        """Detiene el lineal. El tiempo sigue corriendo pero ninguna torre avanza."""
         self._en_marcha = False
         self.guia_izquierda.contactor.abrir()
         self.guia_derecha.contactor.abrir()
+
+    def invertir_direccion(self):
+        """Alterna entre avance (norte) y marcha atrás (sur)."""
+        self.direccion *= -1
+
+    @property
+    def en_marcha_atras(self) -> bool:
+        """True cuando el lineal está en marcha atrás (dirección sur)"""
+        return self.direccion == -1
 
     def set_speed(self, velocidad_porcentaje: float):
         """Cambia el duty cycle de ambas torres guía en % durante la simulación"""
@@ -569,11 +490,12 @@ class Lineal:
         self.guia_derecha.contactor.duty_cycle   = dc
 
 
-    def avanza(self, segundos: int = 1, transmitir_gps: bool = True):
+    def avanza(self, segundos: int = 1, transmitir_gps: bool = True,
+               modo_giro: str | None = None):
         """
-        transmitir_gps : si True, llama a gps.transmitir() en cada segundo simulado.
-                         Usar False desde Streamlit y llamar transmitir() manualmente
-                         una sola vez por segundo real para no bloquear la UI.
+        Avanza la simulación el número de segundos indicado.
+        modo_giro None = operación normal. 'der' = Cart pivota, End-tower barre arco. 'izq' = al revés.
+        transmitir_gps False cuando Streamlit usa el hilo GPS propio para no bloquear la UI.
         """
         for _ in range(segundos):
             self.tiempo_total_segundos += 1
@@ -581,34 +503,54 @@ class Lineal:
 
             if self._segundo_en_ciclo == 0:
                 self.ciclo_actual += 1
+                self.motor_rapido_pct_on = self._mr_on_en_ciclo / self.DURACION_CICLO * 100.0
+                self._mr_on_en_ciclo     = 0
 
             if not self._en_marcha:
                 continue  # el tiempo pasa pero las torres no se mueven
 
-            # 1. Torres guía: actualizar contactor (duty cycle) y avanzar
-            self.guia_izquierda.contactor.actualizar_duty_cycle(
-                self._segundo_en_ciclo, self.DURACION_CICLO)
-            self.guia_derecha.contactor.actualizar_duty_cycle(
-                self._segundo_en_ciclo, self.DURACION_CICLO)
-            self.guia_izquierda.avanzar(1)
-            self.guia_derecha.avanzar(1)
+            if modo_giro is None:
+                # Operación normal: duty cycle en ambas guías
+                self.guia_izquierda.contactor.actualizar_duty_cycle(
+                    self._segundo_en_ciclo, self.DURACION_CICLO)
+                self.guia_derecha.contactor.actualizar_duty_cycle(
+                    self._segundo_en_ciclo, self.DURACION_CICLO)
+                self.guia_izquierda.avanzar(1, self.direccion)
+                self.guia_derecha.avanzar(1, self.direccion)
+            
+            elif modo_giro == 'izq':
+                # Cart barre arco, End-tower es pivote fijo
+                self.guia_izquierda.contactor.cerrar()
+                self._avanzar_en_arco(self.guia_izquierda, self.guia_derecha, 1, self.direccion)
+                self.guia_derecha.contactor.abrir()
+            elif modo_giro == 'der':
+                # End-tower barre arco, Cart es pivote fijo
+                self.guia_derecha.contactor.cerrar()
+                self._avanzar_en_arco(self.guia_derecha, self.guia_izquierda, 1, self.direccion)
+                self.guia_izquierda.contactor.abrir()
 
+            # Snapshot de posiciones Y para que todas las intermedias reaccionen al mismo instante
             snapshot_y = [t.posicion_y for t in self.torres]
-            k = self.indice_tramo_rigido          # índice torre borde izquierdo del tramo rígido
-            N = len(self.torres) - 1              # índice guía derecha
+            k = self.indice_tramo_rigido
+            N = len(self.torres) - 1
 
-            # 2. Cascada izquierda (izq → der): torres 1..k siguen a su vecina izquierda
-            for i in range(1, k + 1):
-                self.torres[i].seguir(snapshot_y[i - 1], 1)
+            if modo_giro is None:
+                # Cada intermedia compara con sus dos vecinos y sigue al más adelantado
+                for i in range(1, N):
+                    self.torres[i].seguir(snapshot_y[i - 1], snapshot_y[i + 1], 1, self.direccion)
+            else:
+                # En giro cada intermedia persigue su punto en la línea Cart→End-tower
+                y0 = snapshot_y[0]
+                yN = snapshot_y[N]
+                for i in range(1, N):
+                    y_obj = y0 + (yN - y0) * (i / N)
+                    self.torres[i].seguir_arco(y_obj, 1, self.direccion)
 
-            # 3. Cascada derecha (der → izq): torres k+1..N-1 siguen a su vecina derecha
-            for i in range(N - 1, k, -1):
-                self.torres[i].seguir(snapshot_y[i + 1], 1)
-
-            # 4. Actualizar posiciones X de torres intermedias según la longitud real del tramo
             self._actualizar_posiciones_x()
 
-            # 5. GPS: una vez por segundo simulado (solo en modo script/CLI)
+            if self.torres[self.indice_torre_motor_rapido].contactor.esta_cerrado:
+                self._mr_on_en_ciclo += 1
+
             if self.gps is not None and transmitir_gps:
                 self.gps.transmitir()
 
@@ -677,59 +619,100 @@ class Lineal:
 
     def _actualizar_posiciones_x(self):
         """
-        Recalcula la posición X de todas las torres intermedias respetando la longitud
-        física de cada tramo: sqrt(dx² + dy²) = L en todo momento.
-
-        El tramo rígido (FSS) se trata como un CUERPO RÍGIDO:
-          - No puede comprimirse ni estirarse aunque las guías deriven en X.
-          - Su centro geométrico se calcula como el promedio de lo que sugieren
-            la cascada izquierda y la cascada derecha por separado.
-          - Las torres de sus extremos se colocan simétricamente a ±dx_fss/2
-            respecto a ese centro, garantizando longitud exacta.
-
-        Cascada izquierda  (torres 1 .. k-1)  : X propagada desde el Cart.
-        Cascada derecha    (torres k+2 .. N-1) : X propagada desde el End-tower.
-        Tramo rígido       (torres k  y  k+1)  : cuerpo rígido centrado entre ambas cascadas.
+        Recalcula la X de cada torre manteniendo √(dx²+dy²) = longitud del tramo.
+        Cascada izquierda: propagada desde el Cart hacia el centro.
+        Cascada derecha: propagada desde el End-tower hacia el centro.
+        Tramo rígido: cuerpo rígido, su centro se promedia entre ambas cascadas.
         """
         k = self.indice_tramo_rigido
         N = len(self.torres) - 1
 
         def _dx(t_izq, t_der):
-            """Componente horizontal del tramo entre dos torres, respetando su longitud física."""
-            L    = t_izq.longitud_tramo
-            dy   = t_der.posicion_y - t_izq.posicion_y
+            # Componente X de un tramo manteniendo su longitud física
+            L  = t_izq.longitud_tramo
+            dy = t_der.posicion_y - t_izq.posicion_y
             return math.sqrt(max(0.0, L * L - dy * dy))
 
-        # 1. Cascada izquierda: torres 1..k-1 (excluye el extremo izq del tramo rígido)
+        # Cascada izquierda: torres 1..k-1
         for i in range(1, k):
             t_izq = self.torres[i - 1]
             t     = self.torres[i]
             t.posicion_x = t_izq.posicion_x + _dx(t_izq, t)
 
-        # 2. Cascada derecha: torres k+2..N-1 (excluye el extremo der del tramo rígido)
+        # Cascada derecha: torres k+2..N-1
         for i in range(N - 1, k + 1, -1):
             t     = self.torres[i]
             t_der = self.torres[i + 1]
             t.posicion_x = t_der.posicion_x - _dx(t, t_der)
 
-        # 3. Tramo rígido como cuerpo rígido
-        #    Estimación del extremo izquierdo (torre k) desde la cascada izquierda
+        # Tramo rígido: centrar entre la estimación izquierda y derecha
         t_km1 = self.torres[k - 1]
         t_k   = self.torres[k]
-        x_k_izq = t_km1.posicion_x + _dx(t_km1, t_k)
-
-        #    Estimación del extremo derecho (torre k+1) desde la cascada derecha
         t_k1  = self.torres[k + 1]
         t_k2  = self.torres[k + 2]
-        x_k1_der = t_k2.posicion_x - _dx(t_k1, t_k2)
-
-        #    Componente horizontal del propio tramo rígido (longitud conservada)
-        dx_fss = _dx(t_k, t_k1)
-
-        #    Centro = promedio de ambas estimaciones → distribuye el error a ambos lados
+        x_k_izq  = t_km1.posicion_x + _dx(t_km1, t_k)
+        x_k1_der = t_k2.posicion_x  - _dx(t_k1, t_k2)
+        dx_fss   = _dx(t_k, t_k1)
         x_centro = (x_k_izq + x_k1_der) / 2.0
         t_k.posicion_x  = x_centro - dx_fss / 2.0
         t_k1.posicion_x = x_centro + dx_fss / 2.0
+
+    def _avanzar_en_arco(self, guia_libre: "Torre_Guia", guia_pivote: "Torre_Guia",
+                        segundos: float, direccion: int = 1) -> float:
+        """
+        Mueve la guía libre en arco alrededor del pivote (actualiza X e Y).
+        El sentido de rotación se elige para que Y suba (avance) o baje (marcha atrás).
+        Devuelve los metros de arco recorridos.
+        """
+        x0 = guia_pivote.posicion_x
+        y0 = guia_pivote.posicion_y
+
+        dx = guia_libre.posicion_x - x0
+        dy = guia_libre.posicion_y - y0
+        R  = math.sqrt(dx * dx + dy * dy)
+
+        if R < 1.0:          # caso deguías superpuestas
+            return 0.0
+
+        factor_patinaje = 1.0 - (guia_libre.porcentaje_patinaje / 100.0) * random.uniform(0.5, 1.0)
+        arc_len = guia_libre.velocidad_nominal * (segundos / 60.0) * factor_patinaje
+
+        current_angle = math.atan2(dy, dx)
+        delta_angle   = arc_len / R
+
+        # Sentido angular para que la Y se mueva en la dirección correcta:
+        # avance  + OESTE → clockwise (restar)   avance  + ESTE → CCW (sumar)
+        # atrás   + OESTE → CCW (sumar)          atrás   + ESTE → clockwise (restar)
+        # Equivale a: restar si (dx<0) XOR (marcha atrás)
+        if (guia_libre.posicion_x < x0) == (direccion == 1):
+            new_angle = current_angle - delta_angle
+        else:
+            new_angle = current_angle + delta_angle
+
+        # Ruido lateral del terreno como perturbación angular
+        if guia_libre.ruido_lateral > 0.0 and arc_len > 0.0:
+            new_angle += random.gauss(0.0, guia_libre.ruido_lateral * arc_len / R)
+
+        new_x = x0 + R * math.cos(new_angle)
+        new_y = y0 + R * math.sin(new_angle)
+
+        # Detener si el arco cruzó el límite: Y no puede moverse en contra de la dirección
+        if (new_y - guia_libre.posicion_y) * direccion <= 0:
+            return 0.0
+
+        guia_libre.posicion_x = new_x
+        guia_libre.posicion_y = new_y
+        return arc_len
+
+    def resetear_arco_giro(self):
+        """Alinea las intermedias sobre la línea Cart→End-tower antes de iniciar un giro."""
+        N  = len(self.torres) - 1
+        y0 = self.torres[0].posicion_y
+        yN = self.torres[N].posicion_y
+        for i in range(1, N):
+            self.torres[i].posicion_y = y0 + (yN - y0) * (i / N)
+            self.torres[i].contactor.abrir()
+        self._actualizar_posiciones_x()
 
     def _tiempo_formateado(self) -> str:
         h = self.tiempo_total_segundos // 3600
