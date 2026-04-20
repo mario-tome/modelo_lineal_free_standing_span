@@ -894,9 +894,23 @@ def panel_principal():
             "tiempo":          lineal._tiempo_formateado(),
             "posicion_norte":  round(lineal.posicion_norte, 3),
             "alineado":        lineal.esta_alineado,
+            "slow_cart":       lineal.slow_down_cart,
+            "slow_end":        lineal.slow_down_end_tower,
         }
+        # Posiciones X e Y de cada torre
         for j, t in enumerate(lineal.torres):
-            fila[f"torre_{j}_y"] = round(t.posicion_y, 3)
+            fila[f"torre_{j}_x"] = round(t.posicion_x, 4)
+            fila[f"torre_{j}_y"] = round(t.posicion_y, 4)
+        # Métricas de cada tramo: longitud física real, componente horizontal, desviación Y, ángulo
+        L_nominal = lineal.longitud_tramo
+        for j, tramo in enumerate(lineal.tramos):
+            dx  = tramo.torre_derecha.posicion_x - tramo.torre_izquierda.posicion_x
+            dy  = tramo.desviacion_norte
+            L_real = round((dx**2 + dy**2) ** 0.5, 4)
+            fila[f"tramo_{j+1}_L_real"]  = L_real
+            fila[f"tramo_{j+1}_acort_m"] = round(L_nominal - L_real, 4)  # acortamiento (>0 = más corto)
+            fila[f"tramo_{j+1}_desv_y"]  = round(dy, 4)
+            fila[f"tramo_{j+1}_ang_deg"] = round(tramo.angulo_grados, 4)
         if lineal.gps:
             fila["lat_e7"] = lineal.gps.lat_e7
             fila["lon_e7"] = lineal.gps.lon_e7
