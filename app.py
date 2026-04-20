@@ -108,9 +108,7 @@ defaults = {
     "pos_prev":        0.0,    # posicion_norte del frame anterior
     "tramos_ok_prev":  None,   # estado de alineacion anterior para detectar cambios
     "k_vista_general": False,  # True = campo completo, False = seguir lineal 1:1
-    "giro_modo":        None,   # None | 'izq' | 'der'  — giro manual del pivot
     "tower_trails":     None,   # list[list[(x,y)]] — histórico de posiciones por torre
-    "giro_rail_x":      None,   # (x_cart, x_end) antes de iniciar giro → se restaura al parar
     "marcha_atras_kbd": False,  # estado del pulsador 'S' — sincronizado con el componente JS
     "ar_pasadas":       0,      # número de inversiones automáticas realizadas (auto-reverse)
     "caja_slow_prev":   {"cart": False, "end": False, "safety": True},  # estado anterior para detectar cambios
@@ -349,7 +347,6 @@ with st.sidebar:
             state.running         = True
             state.finished        = False
             state.paused          = False
-            state.giro_modo       = None
             state.caja_slow_prev  = {"cart": False, "end": False, "safety": True}
             state.tower_trails    = [[] for _ in range(len(state.lineal.torres))]
             st.rerun()
@@ -365,7 +362,6 @@ with st.sidebar:
                                "msg": f"Sistema pausado en {state.lineal.posicion_norte:.2f} m"})
             state.running   = False
             state.paused    = True
-            state.giro_modo = None
             st.rerun()
 
     elif state.paused and not state.finished:
@@ -401,8 +397,8 @@ with st.sidebar:
     st.divider()
     st.markdown("##### Teclado (simulación activa)")
     for _key, _desc in [
-        ("< (mantener)", "Giro izq — Cart lento (pivote), End-tower barre arco"),
-        ("- (mantener)", "Giro der — End-tower lento (pivote), Cart barre arco"),
+        ("< (mantener)", "Ralentiza Cart — sigue motor rápido, giro gradual izquierda"),
+        ("- (mantener)", "Ralentiza End-tower — sigue motor rápido, giro gradual derecha"),
         ("R (pulsar)",   "Marcha atrás / avance normal"),
     ]:
         st.markdown(
@@ -460,8 +456,7 @@ def _torre_style(lineal: Lineal, i: int):
 
 
 def build_figure(lineal: Lineal | None, longitud_campo: float, pos_norte: float = 0.0,
-                 vista_general: bool = False, tower_trails: list | None = None,
-                 giro_modo: str | None = None) -> go.Figure:
+                 vista_general: bool = False, tower_trails: list | None = None) -> go.Figure:
     if lineal is None:
         fig = go.Figure()
         fig.update_layout(
@@ -590,40 +585,6 @@ def build_figure(lineal: Lineal | None, longitud_campo: float, pos_norte: float 
                 showlegend=False,
             ))
 
-    # Líneas de referencia del giro activo
-    if giro_modo is not None:
-        _y_lider   = (lineal.torres[0].posicion_y  if giro_modo == 'izq'
-                      else lineal.torres[-1].posicion_y)
-        _y_rezagado = (lineal.torres[-1].posicion_y if giro_modo == 'izq'
-                       else lineal.torres[0].posicion_y)
-        _delta_giro = abs(_y_lider - _y_rezagado)
-
-        # Frente lider: donde estaría el lineal si fuera recto
-        traces.append(go.Scatter(
-            x=[0, fw], y=[_y_lider, _y_lider],
-            mode="lines",
-            line=dict(color="rgba(255,255,255,0.28)", width=1, dash="dash"),
-            hoverinfo="skip", showlegend=False,
-        ))
-        # Guía rezagada: ancla del giro
-        traces.append(go.Scatter(
-            x=[0, fw], y=[_y_rezagado, _y_rezagado],
-            mode="lines",
-            line=dict(color="rgba(255,200,100,0.22)", width=1, dash="dot"),
-            hoverinfo="skip", showlegend=False,
-        ))
-        # 'der' = Cart es pivote = lado izquierdo lento = giro izquierda (tecla <)
-        # 'izq' = End-tower es pivote = lado derecho lento = giro derecha (tecla -)
-        _dir_txt = "◀ GIRO IZQ" if giro_modo == 'der' else "GIRO DER ▶"
-        annotations.append(dict(
-            x=fw * 0.5, y=_y_lider,
-            xref="x", yref="y",
-            text=f"<b>{_dir_txt}  ·  Δ {_delta_giro:.2f} m</b>",
-            showarrow=False, yanchor="bottom",
-            font=dict(color="rgba(255,255,255,0.55)", size=11, family="monospace"),
-            bgcolor="rgba(13,17,23,0.0)", borderwidth=0,
-        ))
-
     # Tramos
     for idx, tramo in enumerate(lineal.tramos):
         x1 = tramo.torre_izquierda.posicion_x
@@ -700,8 +661,21 @@ def build_figure(lineal: Lineal | None, longitud_campo: float, pos_norte: float 
             nombre = f"Intermedia {i}  [cascada derecha]"
 
         cont_cerrado = torre.contactor.esta_cerrado
+
+        # Detectar si esta torre guía está en modo slow_down (duty cycle reducido al 25%).
+        # El flag vive en lineal directamente — lo activa la caja Arduino O el teclado.
+        _en_slow_down = (
+            isinstance(torre, Torre_Guia) and (
+                (i == 0                      and lineal.slow_down_cart)      or
+                (i == len(lineal.torres) - 1 and lineal.slow_down_end_tower)
+            )
+        )
+
         if isinstance(torre, Torre_Guia):
-            cont_txt = f"Contactor: {'ON' if cont_cerrado else 'OFF'}  (set speed {torre.contactor.duty_cycle*100:.0f}%)"
+            if _en_slow_down:
+                cont_txt = f"Contactor: {'ON' if cont_cerrado else 'OFF'}  (sigue motor rápido)"
+            else:
+                cont_txt = f"Contactor: {'ON' if cont_cerrado else 'OFF'}  (set speed {torre.contactor.duty_cycle*100:.0f}%)"
         else:
             cont_txt = f"Contactor: {'ON — desalineada' if cont_cerrado else 'OFF — alineada'}"
 
@@ -725,8 +699,14 @@ def build_figure(lineal: Lineal | None, longitud_campo: float, pos_norte: float 
         borde_color = "#3fb950" if cont_cerrado else "#484f58"
 
         if isinstance(torre, Torre_Guia):
-            estado_txt   = f"Speed {torre.contactor.duty_cycle*100:.0f}%  {'ON' if cont_cerrado else 'OFF'}"
-            estado_color = color
+            if _en_slow_down:
+                if cont_cerrado:
+                    estado_txt, estado_color = "Motor ON  ·  (sigue rápido)", "#e3b341"
+                else:
+                    estado_txt, estado_color = "Motor OFF  ·  (sigue rápido)", "#8b949e"
+            else:
+                estado_txt   = f"Speed {torre.contactor.duty_cycle*100:.0f}%  {'ON' if cont_cerrado else 'OFF'}"
+                estado_color = color
         else:
             if cont_cerrado:
                 estado_txt, estado_color = "Corrigiendo  ·  Motor ON", "#e3b341"
@@ -850,26 +830,30 @@ def panel_principal():
         lineal.guia_izquierda.ruido_lateral = _ruido_live
         lineal.guia_derecha.ruido_lateral   = _ruido_live
 
-    # Caja de interfaz: sincroniza giro_modo con los comandos del algoritmo de guiado
+    # Caja de interfaz: procesa comandos del algoritmo de guiado GPS
     if state.running and lineal is not None and lineal.caja_interfaz:
         caja  = lineal.caja_interfaz
         prev  = state.caja_slow_prev
 
-        # Detectar cambios y registrarlos en el log
+        # Detectar cambios de slow_down y registrarlos en el log
         if caja.slow_down_cart != prev["cart"]:
             prev["cart"] = caja.slow_down_cart
             state.log.append({
                 "t": lineal._tiempo_formateado(), "tipo": "INFO",
-                "msg": ("SLOW_DOWN_CART ON — giro izquierda activado"
-                        if caja.slow_down_cart else "SLOW_DOWN_CART OFF — Cart liberado"),
+                "msg": ("SLOW_DOWN_CART ON — Cart ralentizado, giro gradual hacia izquierda"
+                        if caja.slow_down_cart else "SLOW_DOWN_CART OFF — Cart a velocidad normal"),
             })
         if caja.slow_down_end_tower != prev["end"]:
             prev["end"] = caja.slow_down_end_tower
             state.log.append({
                 "t": lineal._tiempo_formateado(), "tipo": "INFO",
-                "msg": ("SLOW_DOWN_END_TOWER ON — giro derecha activado"
-                        if caja.slow_down_end_tower else "SLOW_DOWN_END_TOWER OFF — End-tower liberado"),
+                "msg": ("SLOW_DOWN_END_TOWER ON — End-tower ralentizado, giro gradual hacia derecha"
+                        if caja.slow_down_end_tower else "SLOW_DOWN_END_TOWER OFF — End-tower a velocidad normal"),
             })
+
+        # Propagar los flags de la caja al modelo para que avanza() los lea
+        lineal.slow_down_cart      = caja.slow_down_cart
+        lineal.slow_down_end_tower = caja.slow_down_end_tower
 
         if not caja.safety_ok and prev["safety"]:
             prev["safety"] = False
@@ -887,26 +871,10 @@ def panel_principal():
                 "msg": "SAFETY_OK — seguridad restaurada (reanuda manualmente)",
             })
 
-        # Calcular nuevo giro y aplicar si cambió
-        _nuevo_giro = ('der' if caja.slow_down_cart and not caja.slow_down_end_tower
-                       else ('izq' if caja.slow_down_end_tower and not caja.slow_down_cart
-                             else None))
-        if _nuevo_giro != state.giro_modo:
-            _prev_giro = state.giro_modo
-            state.giro_modo = _nuevo_giro
-            if _nuevo_giro in ('izq', 'der'):
-                # Guardar rail y alinear intermedias antes del giro
-                state.giro_rail_x = (lineal.torres[0].posicion_x, lineal.torres[-1].posicion_x)
-                lineal.resetear_arco_giro()
-            elif _prev_giro in ('izq', 'der'):
-                # Giro terminado: recalcular X de intermedias
-                lineal._actualizar_posiciones_x()
-                state.giro_rail_x = None
-
     # Avance de simulacion
     if state.running and not state.finished and lineal is not None:
         sim_spd_val = state.get("k_simspd", 60)
-        lineal.avanza(sim_spd_val, transmitir_gps=False, modo_giro=state.giro_modo)
+        lineal.avanza(sim_spd_val, transmitir_gps=False)
         # GPS: el hilo background (iniciado en INICIAR) transmite por su cuenta
 
         # Registro de trayectorias para el renderizado
@@ -1086,8 +1054,16 @@ def panel_principal():
         cols_m[2].metric("Posición media",  f"{lineal.posicion_norte:.2f} m")
         cols_m[3].metric("Recorrido",       f"{porcentaje:.1f} %")
         cols_m[4].metric("Alineación",      "OK" if lineal.esta_alineado else "Corrigiendo")
-        cols_m[5].metric("Guia Izq (Cart)", "ON" if lineal.guia_izquierda.contactor.esta_cerrado else "OFF")
-        cols_m[6].metric("End-tower",       "ON" if lineal.guia_derecha.contactor.esta_cerrado else "OFF")
+        _slow_c = lineal.slow_down_cart
+        _slow_e = lineal.slow_down_end_tower
+        _cart_val = ("★ ON" if lineal.guia_izquierda.contactor.esta_cerrado else "★ OFF") if _slow_c else \
+                    ("ON"   if lineal.guia_izquierda.contactor.esta_cerrado else "OFF")
+        _end_val  = ("★ ON" if lineal.guia_derecha.contactor.esta_cerrado   else "★ OFF") if _slow_e else \
+                    ("ON"   if lineal.guia_derecha.contactor.esta_cerrado   else "OFF")
+        cols_m[5].metric("Guia Izq (Cart)", _cart_val,
+                          help="★ = en slow_down, sigue al motor rápido" if _slow_c else None)
+        cols_m[6].metric("End-tower",       _end_val,
+                          help="★ = en slow_down, sigue al motor rápido" if _slow_e else None)
         cols_m[7].metric("Vel. real",       f"{vel_real:.2f} m/min",
                           delta=f"{delta_vel:+.2f} vs teórica",
                           delta_color="normal")
@@ -1287,7 +1263,6 @@ def panel_principal():
             lineal, longitud_campo, _pos,
             st.session_state.get("k_vista_general", False),
             tower_trails=state.tower_trails,
-            giro_modo=state.giro_modo,
         ),
         width="stretch",
         key="campo_pivot",
@@ -1302,9 +1277,6 @@ def panel_principal():
 
 # Componente de teclado (bidireccional real, iframe persistente).
 # Devuelve {left, right, reverse} en cada cambio de tecla.
-#   < (mantener) → giro izq  — Cart es pivote, End-tower barre arco
-#   - (mantener) → giro der  — End-tower es pivote, Cart barre arco
-#   R (toggle)   → marcha atrás / avance normal
 _key_giro = _giro_kbd(default=None)
 if isinstance(_key_giro, dict):
 
@@ -1323,40 +1295,28 @@ if isinstance(_key_giro, dict):
                 "msg":  _dir_txt,
             })
 
-    # Giro (teclas < y -): izquierda → Cart pivota, derecha → End-tower pivota
-    _prev = st.session_state.giro_modo
-    _new  = ("der" if _key_giro.get("left")
-             else ("izq" if _key_giro.get("right") else None))
-    if _new != _prev:
-        st.session_state.giro_modo = _new
-        if st.session_state.lineal and st.session_state.running:
-            _lin = st.session_state.lineal
+    # Ralentización por teclado: < → ralentiza Cart  /  - → ralentiza End-tower
+    # Mismo comportamiento que SLOW_DOWN desde la caja Arduino: el extremo ralentizado
+    # avanza a SLOW_DOWN_FACTOR × duty_cycle normal; intermedias siguen la diagonal.
+    if st.session_state.lineal and st.session_state.running:
+        _lin         = st.session_state.lineal
+        _slow_c_kbd  = bool(_key_giro.get("left",  False))
+        _slow_e_kbd  = bool(_key_giro.get("right", False))
 
-            if _new in ('izq', 'der'):
-                # Guardar posiciones X del carril antes del giro
-                st.session_state.giro_rail_x = (
-                    _lin.torres[0].posicion_x,
-                    _lin.torres[-1].posicion_x,
-                )
-                # Snap al arco: elimina kinks heredados de operación normal
-                _lin.resetear_arco_giro()
-                # Los trails NO se limpian: el historial es continuo (normal + giro + vuelta)
-
-            elif _prev in ('izq', 'der') and _new is None:
-                # Giro terminado: el lineal continúa desde donde el arco dejó las guías.
-                # No se restauran las X — cada guía sigue en su nueva posición y avanza
-                # desde ahí. Solo recalculamos X de intermedios para consistencia.
-                _lin._actualizar_posiciones_x()
-                st.session_state.giro_rail_x = None
-
-            # 'der' = Cart es pivote = lado izquierdo lento (tecla <)
-            # 'izq' = End-tower es pivote = lado derecho lento (tecla -)
-            _lado_txt = "izquierda" if _new == 'der' else ("derecha" if _new == 'izq' else "")
+        # Solo actualizar si hay cambio (evita escribir en cada tick sin cambio)
+        if _slow_c_kbd != _lin.slow_down_cart or _slow_e_kbd != _lin.slow_down_end_tower:
+            _lin.slow_down_cart      = _slow_c_kbd
+            _lin.slow_down_end_tower = _slow_e_kbd
+            if _slow_c_kbd:
+                _msg = "Teclado < — Cart ralentizado, giro gradual hacia izquierda"
+            elif _slow_e_kbd:
+                _msg = "Teclado - — End-tower ralentizado, giro gradual hacia derecha"
+            else:
+                _msg = "Teclado liberado — velocidad normal"
             st.session_state.log.append({
                 "t":    _lin._tiempo_formateado(),
                 "tipo": "INFO",
-                "msg":  (f"Giro {_lado_txt} activado  (pivota lado {_lado_txt})"
-                         if _new else "Giro detenido — avance normal"),
+                "msg":  _msg,
             })
 
 panel_principal()
