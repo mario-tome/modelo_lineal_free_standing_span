@@ -131,11 +131,11 @@ def _get_origen_latlon() -> tuple:
     """Devuelve (lat_origen, lon_origen) según el modo de conexión activo en el sidebar."""
     modo = st.session_state.get("k_conexion_modo", "ninguno")
     if modo == "caja":
-        return (st.session_state.get("k_caja_lat", 40.4168),
-                st.session_state.get("k_caja_lon", -3.7038))
+        return (st.session_state.get("k_caja_lat_e7", 404168000) / 1e7,
+                st.session_state.get("k_caja_lon_e7", -37038000) / 1e7)
     if modo == "gps":
-        return (st.session_state.get("k_gps_lat",  40.4168),
-                st.session_state.get("k_gps_lon",  -3.7038))
+        return (st.session_state.get("k_gps_lat_e7",  404168000) / 1e7,
+                st.session_state.get("k_gps_lon_e7",  -37038000) / 1e7)
     return (40.4168, -3.7038)
 
 
@@ -353,10 +353,10 @@ with st.sidebar:
             format_func=lambda i: f"Intermedia {i}",
         )
         c_lat, c_lon = st.columns(2)
-        c_lat.number_input("Lat. origen (°)", value=40.4168, format="%.4f",
-                           key="k_gps_lat", disabled=locked)
-        c_lon.number_input("Lon. origen (°)", value=-3.7038, format="%.4f",
-                           key="k_gps_lon", disabled=locked)
+        c_lat.number_input("Lat. origen (×10⁷)", value=404168000, step=1,
+                           key="k_gps_lat_e7", disabled=locked)
+        c_lon.number_input("Lon. origen (×10⁷)", value=-37038000, step=1,
+                           key="k_gps_lon_e7", disabled=locked)
         st.markdown('<p style="font-size:0.875rem;margin:0 0 4px 0">Puerto serie</p>',
                     unsafe_allow_html=True)
         c_puerto, c_refresh = st.columns([6, 1])
@@ -379,10 +379,10 @@ with st.sidebar:
         # Carr=2 fijo: el gemelo conoce la posición exacta, siempre reportamos RTK FIX
         st.session_state["k_caja_carr"] = 2
         c_lat_c, c_lon_c = st.columns(2)
-        c_lat_c.number_input("Lat. origen (°)", value=40.4168, format="%.4f",
-                              key="k_caja_lat", disabled=locked)
-        c_lon_c.number_input("Lon. origen (°)", value=-3.7038, format="%.4f",
-                              key="k_caja_lon", disabled=locked)
+        c_lat_c.number_input("Lat. origen (×10⁷)", value=404168000, step=1,
+                              key="k_caja_lat_e7", disabled=locked)
+        c_lon_c.number_input("Lon. origen (×10⁷)", value=-37038000, step=1,
+                              key="k_caja_lon_e7", disabled=locked)
         st.markdown('<p style="font-size:0.875rem;margin:0 0 4px 0">Puerto serie Arduino</p>',
                     unsafe_allow_html=True)
         _SIN_CAJA_PUERTO = "— Selecciona puerto —"
@@ -447,8 +447,8 @@ with st.sidebar:
                 puerto = None if (puerto_raw == _SIN_PUERTO) else puerto_raw
                 state.lineal.asignar_gps(
                     indice_torre    = st.session_state.get("k_gps_torre", 1),
-                    lat_origen      = st.session_state.get("k_gps_lat", 40.4168),
-                    lon_origen      = st.session_state.get("k_gps_lon", -3.7038),
+                    lat_origen      = st.session_state.get("k_gps_lat_e7", 404168000) / 1e7,
+                    lon_origen      = st.session_state.get("k_gps_lon_e7", -37038000) / 1e7,
                     puerto_serial   = puerto,
                     verbose_consola = (puerto is None),
                 )
@@ -458,8 +458,8 @@ with st.sidebar:
                 if _caja_puerto and _caja_puerto != "— Selecciona puerto —":
                     state.lineal.asignar_caja(
                         indice_torre  = st.session_state.get("k_caja_torre", 1),
-                        lat_origen    = st.session_state.get("k_caja_lat", 40.4168),
-                        lon_origen    = st.session_state.get("k_caja_lon", -3.7038),
+                        lat_origen    = st.session_state.get("k_caja_lat_e7", 404168000) / 1e7,
+                        lon_origen    = st.session_state.get("k_caja_lon_e7", -37038000) / 1e7,
                         puerto_serial = _caja_puerto,
                         carr          = st.session_state.get("k_caja_carr", 2),
                     )
@@ -756,8 +756,10 @@ def build_figure(lineal: Lineal | None, longitud_campo: float, pos_norte: float 
 
         # Anotacion en el punto medio de TODOS los tramos
         mx, my = (x1 + x2) / 2, (y1 + y2) / 2
+        
         # Texto usa el color de alineacion (verde/amarillo/rojo)
         ann_text_color = color
+        
         # Borde naranja para el FSS, color de alineacion para el resto
         ann_border = "#ffa657" if tramo.es_rigido else color
         header_txt = f"T{idx + 1}  FSS" if tramo.es_rigido else f"T{idx + 1}"

@@ -4,7 +4,7 @@ import math, random, threading, time as _time
 def avanzar_en_circunferencia(x_c, y_c, r, x_i, y_i, d):
     """
     Posición final de un móvil que recorre distancia d sobre una circunferencia.
-    d > 0 → sentido antihorario  |  d < 0 → sentido horario
+    d > 0 = sentido antihorario, d < 0 = sentido horario
     """
     angulo_inicial   = math.atan2(y_i - y_c, x_i - x_c)
     angulo_recorrido = d / r
@@ -21,13 +21,13 @@ except ImportError:
     _SERIAL_DISPONIBLE = False
 
 
-# Conecta/desconecta el motor de una torre.
-# Torres guía: modo duty cycle (ciclos ON/OFF de 60 s para controlar la velocidad media).
-# Torres intermedias: indicador de alineación (ON = desalineada, OFF = alineada).
+# Conecta/desconecta el motor de una torre
+# Torres guía: modo duty cycle (ciclos ON/OFF de 60 s para controlar la velocidad media)
+# Torres intermedias: indicador de alineación (ON = desalineada, OFF = alineada)
 class Contactor:
 
-    CERRADO = "CERRADO"   # Motor ON
-    ABIERTO  = "ABIERTO"  # Motor OFF
+    CERRADO = "CERRADO"   # motor ON
+    ABIERTO  = "ABIERTO"  # motor OFF
 
     def __init__(self, velocidad_porcentaje: float = 0.0):
         """velocidad_porcentaje: duty cycle en % (solo relevante en torres guía)"""
@@ -53,8 +53,8 @@ class Contactor:
         return f"Contactor(duty={self.duty_cycle * 100:.0f}%, estado={self.estado})"
 
 
-# Torre base: X fija (posición lateral), Y avanza al norte cuando el motor está ON.
-# Cada torre tiene un porcentaje de patinaje aleatorio que simula irregularidades del terreno.
+# Torre base: X fija (posición lateral), Y avanza al norte cuando el motor está ON
+# Cada torre tiene un porcentaje de patinaje aleatorio que simula irregularidades del terreno
 class Torre:
 
     def __init__(self, posicion_x: float, posicion_y: float,
@@ -67,11 +67,11 @@ class Torre:
 
     def avanzar(self, segundos: float, direccion: int = 1) -> float:
         """
-        Mueve la torre durante 'segundos' a velocidad nominal.
+        Mueve la torre durante "segundos" a velocidad nominal
         direccion =  1 → hacia el norte (avance normal)
         direccion = -1 → hacia el sur   (marcha atrás)
-        El patinaje reduce ligeramente la velocidad según el terreno.
-        Devuelve los metros recorridos (positivo siempre; el signo lo da direccion).
+        El patinaje reduce ligeramente la velocidad según el terreno (0-5% aleatorio por torre)
+        Devuelve los metros recorridos (positivo siempre, el signo lo da direccion)
         """
         factor_patinaje  = 1.0 - (self.porcentaje_patinaje / 100.0) * random.uniform(0.5, 1.0)
         metros_avanzados = self.velocidad_nominal * (segundos / 60.0) * factor_patinaje
@@ -86,22 +86,23 @@ class Torre:
         return f"{self.__class__.__name__}(x={self.posicion_x:.0f}m, y={self.posicion_y:.3f}m)"
 
 
-# Torres de los extremos: Cart (izquierda) y End-tower (derecha).
-# Son las únicas con contactor de duty cycle — su ciclo ON/OFF marca el ritmo de avance.
-# En modo slow_down abandonan el duty cycle y copian el ON/OFF del motor rápido.
+# Torres de los extremos: Cart (izquierda) y End-tower (derecha)
+# Son las únicas con contactor de duty cycle — su ciclo ON/OFF marca el ritmo de avance
+# En modo slow_down abandonan el duty cycle y copian el ON/OFF del motor rápido
 class Torre_Guia(Torre):
 
     def __init__(self, posicion_x: float, posicion_y: float,
                  longitud_tramo: float, velocidad_nominal: float = 3.0,
                  velocidad_porcentaje: float = 50.0,
                  ruido_lateral: float = 0.0):
-        # ruido_lateral: deriva lateral aleatoria por metro avanzado (0=perfecto, 0.070=loco)
+        
+        # RUIDO LATERAL: deriva lateral aleatoria por metro avanzado (0=perfecto, 0.070=loco)
         super().__init__(posicion_x, posicion_y, longitud_tramo, velocidad_nominal)
         self.contactor     = Contactor(velocidad_porcentaje)
         self.ruido_lateral = ruido_lateral
 
     def avanzar(self, segundos: float, direccion: int = 1) -> float:
-        """Avanza (o retrocede) si el contactor está cerrado. Aplica ruido lateral del terreno."""
+        """Avanza o retrocede si el contactor está cerrado. Aplica ruido lateral del terreno"""
         if self.contactor.esta_cerrado:
             metros = super().avanzar(segundos, direccion)
             if self.ruido_lateral > 0.0 and metros > 0.0:
@@ -115,9 +116,9 @@ class Torre_Guia(Torre):
                 f" contactor={self.contactor.estado}){ruido_txt}")
 
 
-# Torres intermedias: contactor de alineación ON/OFF (sin duty cycle).
-# ON = desalineada, motor activo recuperando posición. OFF = alineada, motor parado.
-# La del extremo derecho del tramo rígido tiene motor más rápido (cubre más ángulo en el mismo tiempo).
+# Torres intermedias: contactor de alineación ON/OFF (sin duty cycle)
+# ON = desalineada, motor activo recuperando posición. OFF = alineada, motor parado
+# La del extremo derecho del tramo rígido tiene motor más rápido (cubre más ángulo en el mismo tiempo)
 class Torre_Intermedia(Torre):
 
     FACTOR_SOBREVELOCIDAD        = 1.5   # motor intermedio normal: ×1.5 la velocidad nominal
@@ -128,6 +129,7 @@ class Torre_Intermedia(Torre):
     def __init__(self, posicion_x: float, posicion_y: float,
                  longitud_tramo: float, velocidad_nominal: float = 3.0,
                  es_motor_rapido: bool = False):
+        
         # es_motor_rapido: True solo para la torre del extremo derecho del tramo rígido
         super().__init__(posicion_x, posicion_y, longitud_tramo, velocidad_nominal)
         self.contactor      = Contactor()   # contactor de alineación (sin duty cycle)
@@ -143,12 +145,10 @@ class Torre_Intermedia(Torre):
                direccion: int = 1,
                pivot_x: float = None, pivot_y: float = None) -> float:
         """
-        Histéresis 10-10: activa cuando ≥10 cm por detrás del objetivo (y_target),
-        avanza a velocidad nominal completa y para cuando supera el objetivo en ≥10 cm.
-        Si se pasan pivot_x/pivot_y, la torre avanza sobre el arco de circunferencia
-        centrado en el pivote (torre vecina ya actualizada), radio = longitud_tramo.
+        Activa cuando ≥10 cm por detrás del objetivo (y_target), avanza a velocidad nominal completa y para cuando supera el objetivo en ≥10 cm
+        Si se pasan pivot_x/pivot_y, la torre avanza sobre el arco de circunferencia centrado en el pivote radio = longitud_tramo
         """
-        desviacion = (y_target - self.posicion_y) * direccion  # + = atrasada, - = adelantada
+        desviacion = (y_target - self.posicion_y) * direccion  # + atrasada, - adelantada
 
         if desviacion >= self.UMBRAL_ARRANQUE:
             self.contactor.cerrar()
@@ -163,8 +163,8 @@ class Torre_Intermedia(Torre):
                             * (segundos / 60.0) * factor_patinaje)
 
         if pivot_x is not None and pivot_y is not None:
-            # Cascada izquierda: torre a la DERECHA del pivote → antihorario = norte → d positivo
-            # Cascada derecha:   torre a la IZQUIERDA del pivote → horario = norte → d negativo
+            # Lado izquierdo: torre a la DERECHA del pivote → antihorario = norte → d positivo
+            # Lado derecho: torre a la IZQUIERDA del pivote → horario = norte → d negativo
             d_sign = 1 if self.posicion_x > pivot_x else -1
             d = metros_avanzados * direccion * d_sign
             self.posicion_x, self.posicion_y = avanzar_en_circunferencia(
@@ -182,7 +182,8 @@ class Torre_Intermedia(Torre):
                 f" contactor={self.contactor.estado}){rapido_txt}")
 
 
-# Segmento entre dos torres. Mide su ángulo e inclinación (0° = perfectamente alineado).
+# Segmento entre dos torres
+# Mide su ángulo e inclinación (0° = perfectamente alineado)
 # El tramo rígido central (Free Standing Span) no puede doblarse: sus torres se mueven como un bloque.
 class Tramo:
 
@@ -201,7 +202,7 @@ class Tramo:
 
     @property
     def desviacion_norte(self) -> float:
-        """Diferencia en Y entre torre derecha e izquierda (0 = alineado, + = derecha adelantada)."""
+        """Diferencia en Y entre torre derecha e izquierda (0 = alineado, + = derecha adelantada)"""
         return self.torre_derecha.posicion_y - self.torre_izquierda.posicion_y
 
     @property
@@ -224,10 +225,10 @@ class Tramo:
                 f" angulo={self.angulo_grados:+.3f}grd){rigido_txt}")
 
 
-# GPS virtual asignado a una Torre_Intermedia.
+# GPS virtual asignado a una Torre_Intermedia
 # Convierte X/Y (metros) a lat/lon reales usando el Cart como origen geográfico.
 # Emite coordenadas como enteros ×10⁷ (ej. 40.1234567° → 401234567) por puerto serie cada segundo.
-# Sin puerto configurado puede imprimir por consola para depuración.
+# Sin puerto configurado puede imprimir por consola para depuración
 class GPS:
 
     # 1 grado de latitud ≈ 111 320 m
@@ -240,18 +241,16 @@ class GPS:
                  puerto_serial: str = None,
                  baudrate: int = 9600,
                  verbose_consola: bool = False):
-        # lat/lon_origen: coordenadas GPS reales del Cart al inicio (X=0, Y=0)
-        # puerto_serial: 'COM3', '/dev/ttyUSB0', etc. None = sin hardware
-        # verbose_consola: imprime coordenadas por consola cuando no hay puerto serie
+
         self.torre            = torre
         self.lat_origen       = lat_origen
         self.lon_origen       = lon_origen
         self.puerto_serial    = puerto_serial
         self.baudrate         = baudrate
         self.verbose_consola  = verbose_consola
-        self._conexion        = None   # objeto serial; se abre al primer uso
-        self._hilo            = None   # hilo de transmisión en background
-        self._activo          = False  # controla el bucle del hilo
+        self._conexion        = None   
+        self._hilo            = None   
+        self._activo          = False
 
     @property
     def latitud(self) -> float:
@@ -266,20 +265,20 @@ class GPS:
 
     @property
     def lat_e7(self) -> int:
-        """Latitud en formato entero ×10⁷ (para hardware GPS)"""
+        """Latitud en formato entero ×10⁷"""
         return round(self.latitud * 1e7)
 
     @property
     def lon_e7(self) -> int:
-        """Longitud en formato entero ×10⁷ (para hardware GPS)"""
+        """Longitud en formato entero ×10⁷"""
         return round(self.longitud * 1e7)
 
     def _abrir_puerto(self) -> bool:
-        """Intenta abrir el puerto serie. Devuelve True si está listo."""
+        """Intenta abrir el puerto serie, devuelve True si está listo."""
         if self.puerto_serial is None:
             return False
         if not _SERIAL_DISPONIBLE:
-            print("[GPS] pyserial no instalado. Ejecuta: pip install pyserial")
+            print("Pyserial no instalado, ejecuta: pip install pyserial")
             return False
         try:
             if self._conexion is None or not self._conexion.is_open:
@@ -288,11 +287,11 @@ class GPS:
                 )
             return True
         except Exception as e:
-            print(f"[GPS] Error abriendo {self.puerto_serial}: {e}")
+            print(f"Error abriendo {self.puerto_serial}: {e}")
             return False
 
     def cerrar_puerto(self):
-        """Cierra el puerto serie si está abierto."""
+        """Cierra el puerto serie si está abierto"""
         if self._conexion and self._conexion.is_open:
             self._conexion.close()
 
@@ -311,8 +310,9 @@ class GPS:
         self._activo = False
 
     def _bucle_transmision(self):
-        """Bucle del hilo de transmisión: envía por USB o imprime por consola cada segundo."""
+        """Bucle del hilo de transmisión: envía por USB o imprime por consola cada segundo"""
         conexion = None
+        
         if self.puerto_serial is not None:
             try:
                 conexion = _serial_module.Serial(
@@ -321,7 +321,7 @@ class GPS:
                     rtscts=False, dsrdtr=False, xonxoff=False,
                 )
             except Exception as e:
-                print(f"[GPS] Error abriendo {self.puerto_serial}: {e}")
+                print(f"Error abriendo {self.puerto_serial}: {e}")
                 return
 
         while self._activo:
@@ -331,17 +331,17 @@ class GPS:
                     conexion.write(mensaje.encode("utf-8"))
                     conexion.flush()
                 except Exception as e:
-                    print(f"[GPS] Error en transmisión: {e}")
+                    print(f"Error en transmisión: {e}")
                     break
             if self.verbose_consola:
-                print(f"[GPS] {mensaje.strip()}  ({self.latitud:.7f}°, {self.longitud:.7f}°)")
+                print(f"GPS {mensaje.strip()}  ({self.latitud:.7f}°, {self.longitud:.7f}°)")
             _time.sleep(1.0)
 
         if conexion is not None:
             conexion.close()
 
     def transmitir(self):
-        """Envía la posición actual por USB (o consola si verbose). Formato: LAT:xxx,LON:xxx"""
+        """Envía la posición actual por USB (o consola si verbose)"""
         mensaje = f"LAT:{self.lat_e7},LON:{self.lon_e7}\n"
 
         if self._abrir_puerto():
@@ -360,14 +360,13 @@ class GPS:
                 f" puerto={puerto_txt})")
 
 
-# Gestiona la comunicación bidireccional con la caja de interfaz Arduino (115 200 baud).
-#
+# Gestiona la comunicación bidireccional con la caja de interfaz Arduino (115 200 baud)
 # La caja conecta el gemelo digital con el algoritmo de guiado físico:
-#   PC → Arduino  (1 Hz)  "Lat 415191807 Lon -47151090 Carr 2"  — posición GPS
-#   Arduino → PC  (evento) "SLOW_DOWN_CART_ON/OFF"               — orden de ralentizar Cart
-#                           "SLOW_DOWN_END_TOWER_ON/OFF"          — orden de ralentizar End-tower
-#                           "SAFETY_OK / SAFETY_FAIL"             — estado de seguridad
-#                           "GPS_OK / GPS_FAIL"                   — estado del GPS de la caja
+# PC → Arduino  (1 Hz)  "Lat 415191807 Lon -47151090 Carr 2"  — posición GPS
+# Arduino → PC  (evento) "SLOW_DOWN_CART_ON/OFF"              — orden de ralentizar Cart
+#                        "SLOW_DOWN_END_TOWER_ON/OFF"         — orden de ralentizar End-tower
+#                        "SAFETY_OK / SAFETY_FAIL"            — estado de seguridad
+#                        "GPS_OK / GPS_FAIL"                  — estado del GPS de la caja
 #
 # carr = calidad RTK reportada: 0 = sin RTK  1 = RTK float  2 = RTK FIX
 class CajaInterfaz:
@@ -380,9 +379,7 @@ class CajaInterfaz:
                  lon_origen: float,
                  puerto_serial: str,
                  carr: int = 2):
-        # torre: torre cuya posición X/Y se convierte a GPS y se envía al Arduino
-        # lat_origen / lon_origen: coordenadas del Cart en el punto de inicio (X=0, Y=0)
-        # puerto_serial: puerto USB del Arduino ('COM3', '/dev/ttyUSB0', …)
+
         self.torre         = torre
         self.lat_origen    = lat_origen
         self.lon_origen    = lon_origen
@@ -419,7 +416,7 @@ class CajaInterfaz:
     def iniciar(self):
         """Abre el puerto serie y lanza el hilo de comunicación bidireccional."""
         if not _SERIAL_DISPONIBLE:
-            print("[CajaInterfaz] pyserial no instalado — ejecuta: pip install pyserial")
+            print("Pyserial no instalado, ejecuta: pip install pyserial")
             return
         if self._hilo is not None and self._hilo.is_alive():
             return
@@ -428,20 +425,20 @@ class CajaInterfaz:
         self._hilo.start()
 
     def detener(self):
-        """Señaliza al hilo de comunicación que se detenga."""
+        """Señaliza al hilo de comunicación que se detenga"""
         self._activo = False
 
     def _bucle(self):
-        """Hilo único: envía GPS al Arduino cada segundo y procesa los mensajes entrantes."""
+        """único hilo, envía GPS al Arduino cada segundo y procesa los mensajes entrantes"""
         try:
             ser = _serial_module.Serial(
                 self.puerto_serial, self.BAUDRATE,
-                timeout=0.1,       # readline() no bloquea más de 100 ms
+                timeout=0.1,      
                 write_timeout=1,
                 rtscts=False, dsrdtr=False, xonxoff=False,
             )
         except Exception as e:
-            print(f"[CajaInterfaz] No se pudo abrir {self.puerto_serial}: {e}")
+            print(f"No se pudo abrir {self.puerto_serial}: {e}")
             return
 
         ultimo_envio = 0.0
@@ -456,10 +453,10 @@ class CajaInterfaz:
                     ser.flush()
                     ultimo_envio = ahora
                 except Exception as e:
-                    print(f"[CajaInterfaz] Error enviando GPS: {e}")
+                    print(f"Error enviando GPS: {e}")
                     break
 
-            # Leer y procesar mensajes del Arduino (sin bloqueo, timeout 100 ms)
+            # Leer y procesar mensajes del Arduino
             try:
                 linea = ser.readline().decode("utf-8", errors="replace").strip()
                 if linea:
@@ -467,13 +464,13 @@ class CajaInterfaz:
                     self._procesar(linea)
             except Exception as e:
                 if self._activo:
-                    print(f"[CajaInterfaz] Error leyendo: {e}")
+                    print(f"Error leyendo: {e}")
                 break
 
         ser.close()
 
     def _procesar(self, msg: str):
-        """Actualiza el estado interno según el mensaje recibido del Arduino."""
+        """Actualiza el estado interno según el mensaje recibido del Arduino"""
         if   msg == "SLOW_DOWN_CART_ON":         self.slow_down_cart      = True
         elif msg == "SLOW_DOWN_CART_OFF":         self.slow_down_cart      = False
         elif msg == "SLOW_DOWN_END_TOWER_ON":     self.slow_down_end_tower = True
@@ -484,9 +481,9 @@ class CajaInterfaz:
         elif msg == "GPS_FAIL":                   self.gps_ok              = False
 
 
-# Orquestador del lineal Free Standing Span (FSS).
-# Gestiona guías (duty cycle o slow_down), intermedias (alineación) y tramo rígido central.
-# Comienza PARADO — usar start() para ponerlo en marcha.
+# Orquestador del lineal con Free Standing Span
+# Gestiona guías (duty cycle o slow_down), intermedias (alineación) y tramo rígido central
+# Comienza PARADO — usar start() para ponerlo en marcha
 class Lineal:
     DURACION_CICLO = 60  # segundos por ciclo de duty cycle de las torres guía
 
@@ -496,9 +493,7 @@ class Lineal:
                  velocidad_porcentaje: float = 50.0,
                  velocidad_nominal: float    = 3.0,
                  ruido_lateral: float        = 0.0):
-        # numero_tramos: mínimo 3 (torres totales = numero_tramos + 1)
-        # velocidad_porcentaje: duty cycle de las guías — velocidad media = nominal × (pct/100)
-        # ruido_lateral: deriva lateral por metro avanzado (0 = sin ruido)
+        
         if numero_tramos < 3:
             raise ValueError(
                 "El lineal Free Standing Span necesita mínimo 3 tramos"
@@ -509,13 +504,12 @@ class Lineal:
         self.velocidad_porcentaje = velocidad_porcentaje
         self.velocidad_nominal    = velocidad_nominal
 
-        # Tramo rígido: el tramo central del lineal
+        # Tramo rígido es el tramo central del lineal
         self.indice_tramo_rigido = numero_tramos // 2
 
-        # Torre más rápida: extremo DERECHO del tramo rígido
+        # Torre más rápida: extremo derecho del tramo rígido
         self.indice_torre_motor_rapido = self.indice_tramo_rigido + 1
 
-        # torres[0] = Cart (izq), torres[1..N-1] = intermedias, torres[N] = End-tower (der)
         self.torres = []
 
         self.torres.append(Torre_Guia(
@@ -563,7 +557,7 @@ class Lineal:
         self._en_marcha            = False   # el lineal comienza PARADO
 
         self._mr_on_en_ciclo      = 0      # segundos ON del motor rápido en el ciclo actual
-        self.motor_rapido_pct_on  = 0.0   # % ON del motor rápido en el último ciclo completo
+        self.motor_rapido_pct_on  = 0.0    # % ON del motor rápido en el último ciclo completo
 
         # Dirección de marcha:  1 = avance (norte), -1 = marcha atrás (sur)
         self.direccion: int = 1
@@ -585,12 +579,14 @@ class Lineal:
                     puerto_serial: str = None,
                     baudrate: int = 9600,
                     verbose_consola: bool = False):
+        
         """Asigna un GPS a la torre intermedia indicada (indice entre 1 y N-1)."""
         if not (1 <= indice_torre <= self.numero_tramos - 1):
             raise ValueError(
                 f"indice_torre debe estar entre 1 y {self.numero_tramos - 1} "
                 f"(solo torres intermedias)"
             )
+        
         torre = self.torres[indice_torre]
         if not isinstance(torre, Torre_Intermedia):
             raise ValueError(f"La torre {indice_torre} no es una Torre_Intermedia")
@@ -608,6 +604,7 @@ class Lineal:
             raise ValueError(
                 f"indice_torre debe estar entre 1 y {self.numero_tramos - 1}"
             )
+        
         self.caja_interfaz = CajaInterfaz(
             torre         = self.torres[indice_torre],
             lat_origen    = lat_origen,
@@ -617,17 +614,17 @@ class Lineal:
         )
 
     def start(self):
-        """Pone el lineal en marcha."""
+        """Pone el lineal en marcha"""
         self._en_marcha = True
 
     def stop(self):
-        """Detiene el lineal. El tiempo sigue corriendo pero ninguna torre avanza."""
+        """Detiene el lineal. El tiempo sigue corriendo pero ninguna torre avanza"""
         self._en_marcha = False
         self.guia_izquierda.contactor.abrir()
         self.guia_derecha.contactor.abrir()
 
     def invertir_direccion(self):
-        """Alterna entre avance (norte) y marcha atrás (sur)."""
+        """Alterna entre avance (norte) y marcha atrás (sur)"""
         self.direccion *= -1
 
     @property
@@ -644,7 +641,7 @@ class Lineal:
 
 
     def avanza(self, segundos: int = 1, transmitir_gps: bool = True):
-        """Avanza la simulación el número de segundos indicado."""
+        """Avanza la simulación el número de segundos indicado"""
         for _ in range(segundos):
             self.tiempo_total_segundos += 1
             self._segundo_en_ciclo      = self.tiempo_total_segundos % self.DURACION_CICLO
@@ -657,7 +654,7 @@ class Lineal:
             if not self._en_marcha:
                 continue  # el tiempo pasa pero las torres no se mueven
 
-            # Leer estado de ralentización (activado por caja Arduino o por teclado)
+            # Leer estado de ralentización
             _slow_cart = self.slow_down_cart
             _slow_end  = self.slow_down_end_tower
 
@@ -671,10 +668,7 @@ class Lineal:
             torre_rapida = self.torres[self.indice_torre_motor_rapido]
 
             if _slow_cart and not _slow_end:
-                # SLOW_DOWN_CART: Cart copia el ON/OFF del motor rápido.
-                # El motor rápido activa cuando la diagonal Cart→End-tower le exige avanzar
-                # → Cart avanza en ráfagas sincronizadas con la corrección de alineación,
-                #   mucho menos que End-tower → giro gradual hacia la izquierda.
+                # SLOW_DOWN_CART: Cart copia el ON/OFF del motor rápido
                 if torre_rapida.contactor.esta_cerrado:
                     self.guia_izquierda.contactor.cerrar()
                 else:
@@ -683,8 +677,7 @@ class Lineal:
                 self.guia_derecha.avanzar(1, self.direccion)
 
             elif _slow_end and not _slow_cart:
-                # SLOW_DOWN_END_TOWER: End-tower copia el ON/OFF del motor rápido.
-                # Cart lleva el ritmo normal → giro gradual hacia la derecha.
+                # SLOW_DOWN_END_TOWER: End-tower copia el ON/OFF del motor rápido
                 if torre_rapida.contactor.esta_cerrado:
                     self.guia_derecha.contactor.cerrar()
                 else:
@@ -712,7 +705,7 @@ class Lineal:
                 self.torres[i].seguir(y_target, 1, self.direccion,
                                       pivot.posicion_x, pivot.posicion_y)
 
-            # Cascada derecha: torres N-1..k+1, pivote = vecino derecho ya actualizado
+            # Lado derecho: torres N-1..k+1, pivote = vecino derecho ya actualizado
             for i in range(N - 1, k, -1):
                 pivot    = self.torres[i + 1]
                 y_target = y_cart + (y_end - y_cart) * i / N
