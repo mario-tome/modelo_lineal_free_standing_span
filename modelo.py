@@ -1,5 +1,19 @@
 import math, random, threading, time as _time
 
+
+def avanzar_en_circunferencia(x_c, y_c, r, x_i, y_i, d):
+    """
+    Posición final de un móvil que recorre distancia d sobre una circunferencia.
+    d > 0 → sentido antihorario  |  d < 0 → sentido horario
+    """
+    angulo_inicial   = math.atan2(y_i - y_c, x_i - x_c)
+    angulo_recorrido = d / r
+    angulo_final     = angulo_inicial + angulo_recorrido
+    x_f = x_c + r * math.cos(angulo_final)
+    y_f = y_c + r * math.sin(angulo_final)
+    return x_f, y_f
+
+
 try:
     import serial as _serial_module
     _SERIAL_DISPONIBLE = True
@@ -126,20 +140,20 @@ class Torre_Intermedia(Torre):
                 else self.FACTOR_SOBREVELOCIDAD)
 
     def seguir(self, y_target: float, segundos: float,
-               direccion: int = 1) -> float:
+               direccion: int = 1,
+               pivot_x: float = None, pivot_y: float = None) -> float:
         """
         Histéresis 10-10: activa cuando ≥10 cm por detrás del objetivo (y_target),
-        avanza a velocidad nominal completa (sin frenar al llegar al objetivo),
-        y para cuando supera el objetivo en ≥10 cm.
-        y_target = interpolación lineal Cart→End-tower para la posición de esta torre.
+        avanza a velocidad nominal completa y para cuando supera el objetivo en ≥10 cm.
+        Si se pasan pivot_x/pivot_y, la torre avanza sobre el arco de circunferencia
+        centrado en el pivote (torre vecina ya actualizada), radio = longitud_tramo.
         """
         desviacion = (y_target - self.posicion_y) * direccion  # + = atrasada, - = adelantada
 
         if desviacion >= self.UMBRAL_ARRANQUE:
-            self.contactor.cerrar()                      # demasiado atrasada → ON
+            self.contactor.cerrar()
         elif desviacion <= -self.UMBRAL_ADELANTO:
-            self.contactor.abrir()                       # demasiado adelantada → OFF
-        # else: zona de histéresis — mantiene el estado actual
+            self.contactor.abrir()
 
         if not self.contactor.esta_cerrado:
             return 0.0
@@ -148,7 +162,18 @@ class Torre_Intermedia(Torre):
         metros_avanzados = (self.velocidad_nominal * self.factor_sobrevelocidad
                             * (segundos / 60.0) * factor_patinaje)
 
-        self.posicion_y += metros_avanzados * direccion
+        if pivot_x is not None and pivot_y is not None:
+            # Cascada izquierda: torre a la DERECHA del pivote → antihorario = norte → d positivo
+            # Cascada derecha:   torre a la IZQUIERDA del pivote → horario = norte → d negativo
+            d_sign = 1 if self.posicion_x > pivot_x else -1
+            d = metros_avanzados * direccion * d_sign
+            self.posicion_x, self.posicion_y = avanzar_en_circunferencia(
+                pivot_x, pivot_y, self.longitud_tramo,
+                self.posicion_x, self.posicion_y, d
+            )
+        else:
+            self.posicion_y += metros_avanzados * direccion
+
         return metros_avanzados
 
     def __repr__(self):
@@ -672,19 +697,29 @@ class Lineal:
                 self.guia_izquierda.avanzar(1, self.direccion)
                 self.guia_derecha.avanzar(1, self.direccion)
 
-            # Cada intermedia apunta a su posición ideal en la diagonal Cart→End-tower.
-            # target_i = y_cart + (y_end - y_cart) × i/N  (interpolación lineal)
-            # Así la cascada izquierda respeta el ritmo del Cart (no se escapa al End-tower)
-            # y la cascada derecha respeta el End-tower.
+            # Cada intermedia sigue su posición ideal en la diagonal Cart→End-tower
+            # (interpolación lineal) avanzando sobre un arco de circunferencia centrado
+            # en la torre vecina ya actualizada → posición (x, y) físicamente correcta.
             y_cart = self.torres[0].posicion_y
             y_end  = self.torres[-1].posicion_y
             N      = len(self.torres) - 1
+            k      = self.indice_tramo_rigido
 
-            for i in range(1, N):
+            # Cascada izquierda: torres 1..k, pivote = vecino izquierdo ya actualizado
+            for i in range(1, k + 1):
+                pivot    = self.torres[i - 1]
                 y_target = y_cart + (y_end - y_cart) * i / N
-                self.torres[i].seguir(y_target, 1, self.direccion)
+                self.torres[i].seguir(y_target, 1, self.direccion,
+                                      pivot.posicion_x, pivot.posicion_y)
 
-            self._actualizar_posiciones_x()
+            # Cascada derecha: torres N-1..k+1, pivote = vecino derecho ya actualizado
+            for i in range(N - 1, k, -1):
+                pivot    = self.torres[i + 1]
+                y_target = y_cart + (y_end - y_cart) * i / N
+                self.torres[i].seguir(y_target, 1, self.direccion,
+                                      pivot.posicion_x, pivot.posicion_y)
+
+            self._actualizar_fss()
 
             if self.torres[self.indice_torre_motor_rapido].contactor.esta_cerrado:
                 self._mr_on_en_ciclo += 1
@@ -755,45 +790,24 @@ class Lineal:
             print(f"    {self.gps}")
             print()
 
-    def _actualizar_posiciones_x(self):
+    def _actualizar_fss(self):
         """
-        Recalcula la X de cada torre manteniendo √(dx²+dy²) = longitud del tramo.
-        Cascada izquierda: propagada desde el Cart hacia el centro.
-        Cascada derecha: propagada desde el End-tower hacia el centro.
-        Tramo rígido: cuerpo rígido, su centro se promedia entre ambas cascadas.
+        Corrige el tramo rígido central (FSS): promedia las posiciones que fijaron
+        las dos cascadas y recoloca ambas torres del FSS de forma horizontal (dy=0),
+        manteniendo la distancia = longitud_tramo.
         """
-        k = self.indice_tramo_rigido
-        N = len(self.torres) - 1
+        k    = self.indice_tramo_rigido
+        t_k  = self.torres[k]
+        t_k1 = self.torres[k + 1]
+        L    = self.longitud_tramo
 
-        def _dx(t_izq, t_der):
-            # Componente X de un tramo manteniendo su longitud física
-            L  = t_izq.longitud_tramo
-            dy = t_der.posicion_y - t_izq.posicion_y
-            return math.sqrt(max(0.0, L * L - dy * dy))
+        x_mid = (t_k.posicion_x + t_k1.posicion_x) / 2.0
+        y_mid = (t_k.posicion_y + t_k1.posicion_y) / 2.0
 
-        # Cascada izquierda: torres 1..k-1
-        for i in range(1, k):
-            t_izq = self.torres[i - 1]
-            t     = self.torres[i]
-            t.posicion_x = t_izq.posicion_x + _dx(t_izq, t)
-
-        # Cascada derecha: torres k+2..N-1
-        for i in range(N - 1, k + 1, -1):
-            t     = self.torres[i]
-            t_der = self.torres[i + 1]
-            t.posicion_x = t_der.posicion_x - _dx(t, t_der)
-
-        # Tramo rígido: centrar entre la estimación izquierda y derecha
-        t_km1 = self.torres[k - 1]
-        t_k   = self.torres[k]
-        t_k1  = self.torres[k + 1]
-        t_k2  = self.torres[k + 2]
-        x_k_izq  = t_km1.posicion_x + _dx(t_km1, t_k)
-        x_k1_der = t_k2.posicion_x  - _dx(t_k1, t_k2)
-        dx_fss   = _dx(t_k, t_k1)
-        x_centro = (x_k_izq + x_k1_der) / 2.0
-        t_k.posicion_x  = x_centro - dx_fss / 2.0
-        t_k1.posicion_x = x_centro + dx_fss / 2.0
+        t_k.posicion_x  = x_mid - L / 2.0
+        t_k1.posicion_x = x_mid + L / 2.0
+        t_k.posicion_y  = y_mid
+        t_k1.posicion_y = y_mid
 
     def _tiempo_formateado(self) -> str:
         h = self.tiempo_total_segundos // 3600
