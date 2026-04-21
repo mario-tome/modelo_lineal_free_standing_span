@@ -1024,30 +1024,49 @@ def panel_principal():
 
         # Fila para CSV
         fila = {
-            "tiempo_s":        lineal.tiempo_total_segundos,
-            "tiempo":          lineal._tiempo_formateado(),
-            "posicion_norte":  round(lineal.posicion_norte, 3),
-            "alineado":        lineal.esta_alineado,
-            "slow_cart":       lineal.slow_down_cart,
-            "slow_end":        lineal.slow_down_end_tower,
+            "tiempo_s":       lineal.tiempo_total_segundos,
+            "tiempo":         lineal._tiempo_formateado(),
+            "posicion_norte": round(lineal.posicion_norte, 3),
+            "slow_cart":      lineal.slow_down_cart,
+            "slow_end_tower": lineal.slow_down_end_tower,
         }
-        # Posiciones X e Y de cada torre
+        # Columnas intercaladas por orden del lineal: torre_j_x/y → métricas del tramo j+1
+        L_nominal = lineal.longitud_tramo
         for j, t in enumerate(lineal.torres):
             fila[f"torre_{j}_x"] = round(t.posicion_x, 4)
             fila[f"torre_{j}_y"] = round(t.posicion_y, 4)
-        # Métricas de cada tramo: longitud física real, componente horizontal, desviación Y, ángulo
-        L_nominal = lineal.longitud_tramo
-        for j, tramo in enumerate(lineal.tramos):
-            dx  = tramo.torre_derecha.posicion_x - tramo.torre_izquierda.posicion_x
-            dy  = tramo.desviacion_norte
-            L_real = round((dx**2 + dy**2) ** 0.5, 4)
-            fila[f"tramo_{j+1}_L_real"]  = L_real
-            fila[f"tramo_{j+1}_acort_m"] = round(L_nominal - L_real, 4)  # acortamiento (>0 = más corto)
-            fila[f"tramo_{j+1}_desv_y"]  = round(dy, 4)
-            fila[f"tramo_{j+1}_ang_deg"] = round(tramo.angulo_grados, 4)
+            if j < lineal.numero_tramos:
+                tramo  = lineal.tramos[j]
+                dx     = tramo.torre_derecha.posicion_x - tramo.torre_izquierda.posicion_x
+                dy     = tramo.desviacion_norte
+                L_calc = round((dx**2 + dy**2) ** 0.5, 4)
+                fila[f"tramo_{j+1}_L_calculado"] = L_calc
+                fila[f"tramo_{j+1}_deform_m"]    = round(L_nominal - L_calc, 4)
+                fila[f"tramo_{j+1}_desv_y"]      = round(dy, 4)
+                fila[f"tramo_{j+1}_rumbo_deg"]   = round(tramo.angulo_grados, 4)
         if lineal.gps:
             fila["lat_e7"] = lineal.gps.lat_e7
             fila["lon_e7"] = lineal.gps.lon_e7
+        # Errores de trayectoria GPS (calculados con la posición actual del frame)
+        if state.get("k_tray_activa", False):
+            _lo_c, _ln_c = _get_origen_latlon()
+            _tray_c = _parse_trayectoria(state.get("k_tray_input", ""), _lo_c, _ln_c)
+            _gt_c, _gi_c = None, -1
+            if lineal.gps:
+                _gt_c = lineal.gps.torre
+                _gi_c = lineal.torres.index(_gt_c)
+            elif lineal.caja_interfaz:
+                _gt_c = lineal.caja_interfaz.torre
+                _gi_c = lineal.torres.index(_gt_c)
+            if _gt_c is not None and len(_tray_c) >= 2:
+                _tr_c = (state.tower_trails[_gi_c]
+                         if state.tower_trails and _gi_c < len(state.tower_trails) else [])
+                _ed_c, _er_c = _calcular_errores(
+                    _gt_c.posicion_x, _gt_c.posicion_y, _tray_c, _tr_c)
+                fila["EΔd_mm"]      = round(_ed_c, 1) if _ed_c is not None else None
+                fila["EΔrumbo_deg"] = round(_er_c, 2) if _er_c is not None else None
+            else:
+                fila["EΔd_mm"] = fila["EΔrumbo_deg"] = None
         state.historial.append(fila)
 
         # GPS track (últimas 20 lecturas)
