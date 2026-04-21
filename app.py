@@ -163,10 +163,10 @@ def _parse_trayectoria(texto: str, lat_orig: float, lon_orig: float) -> list:
 
 def _calcular_errores(gps_x: float, gps_y: float, tray_pts: list, trail: list) -> tuple:
     """
-    Calcula EAd (error de distancia en mm) y Erumbo (error de rumbo en grados).
+    Calcula EΔd (error de distancia en mm) y EΔrumbo (error de rumbo en grados).
 
-    EAd    : distancia perpendicular mínima de la torre GPS al segmento de trayectoria más cercano.
-    Erumbo : diferencia de azimut entre el movimiento real de la torre GPS (del trail) y
+    EΔd    : distancia perpendicular mínima de la torre GPS al segmento de trayectoria más cercano.
+    EΔrumbo: diferencia de azimut entre el movimiento real de la torre GPS (del trail) y
              el azimut del segmento más cercano.  0° = norte, 90° = este.  Rango: [-180, 180].
     """
     if len(tray_pts) < 2:
@@ -405,7 +405,7 @@ with st.sidebar:
         "Activar trayectoria",
         key="k_tray_activa",
         help="Define los puntos de guiado que debe seguir la torre GPS. "
-             "Se visualiza en el campo y se calculan EAd y Erumbo en tiempo real.",
+             "Se visualiza en el campo y se calculan EΔd y EΔrumbo en tiempo real.",
     )
     if state.get("k_tray_activa", False):
         st.caption("Un punto por línea  ·  formato:  LAT×10⁷  LON×10⁷")
@@ -530,25 +530,6 @@ with st.sidebar:
         )
 
     st.divider()
-    st.markdown("##### Leyenda")
-    for color, name, desc in [
-        ("#f78166", "Guia Izq (Cart)",   "Motor + set speed · cascada izq"),
-        ("#d2a8ff", "End-tower",        "Motor + set speed · cascada der"),
-        ("#58a6ff", "Intermedia izq",   "Sigue guia izquierda"),
-        ("#56d364", "Intermedia der",   "Sigue guia derecha"),
-        ("#ffa657", "Motor rapido [R]", "Extremo der del tramo rigido"),
-        ("#ffa657", "Zona rigida",      "Free Standing Span central"),
-        ("#3fb950", "Alineado",         "Desv < 5 cm, angulo < 0.5 grd"),
-        ("#e3b341", "Advertencia",      "Desv < 5 cm, angulo >= 0.5 grd"),
-        ("#f85149", "Desalineado",      "Desv >= 5 cm"),
-        ("#58d68d", "GPS activo",       "Torre con unidad GPS"),
-    ]:
-        st.markdown(
-            f"<span style='display:inline-block;width:10px;height:10px;"
-            f"border-radius:50%;background:{color};margin-right:8px;vertical-align:middle'></span>"
-            f"<b>{name}</b> <span style='color:#8b949e;font-size:0.82rem'>— {desc}</span>",
-            unsafe_allow_html=True,
-        )
 
 
 # Funciones de la figura Plotly (definidas fuera del fragment)
@@ -1142,7 +1123,7 @@ def panel_principal():
                 st.rerun()
                 return
 
-    # EAd y Erumbo: se calculan en cada refresco (running o parado) si la trayectoria está activa
+    # EΔd y EΔrumbo: se calculan en cada refresco (running o parado) si la trayectoria está activa
     if state.get("k_tray_activa", False) and lineal is not None:
         _lo_e, _ln_e = _get_origen_latlon()
         _tray_e = _parse_trayectoria(state.get("k_tray_input", ""), _lo_e, _ln_e)
@@ -1452,16 +1433,16 @@ def panel_principal():
         _erm_v = state.get("trayectoria_erumbo_deg")
         with _col_ead:
             st.metric(
-                "EAd",
+                "EΔd",
                 f"{_ead_v:.0f} mm" if _ead_v is not None else "—",
-                help="Error de distancia: distancia perpendicular de la torre GPS "
-                     "al segmento de trayectoria más cercano",
+                help="Error Δ distancia: desviación perpendicular de la torre GPS "
+                     "respecto al segmento de trayectoria más cercano",
             )
         with _col_erm:
             st.metric(
-                "Erumbo",
+                "EΔrumbo",
                 f"{_erm_v:+.1f}°" if _erm_v is not None else "—",
-                help="Error de rumbo: diferencia entre el azimut de movimiento real "
+                help="Error Δ rumbo: diferencia entre el azimut de movimiento real "
                      "de la torre GPS y el azimut del segmento objetivo "
                      "(0° = norte, + = desviado a la derecha, − = a la izquierda)",
             )
