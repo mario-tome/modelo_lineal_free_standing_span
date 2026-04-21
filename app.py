@@ -3,6 +3,7 @@ streamlit run app.py
 """
 import csv
 import io
+import math
 import os
 import pandas as pd
 import streamlit as st
@@ -112,12 +113,106 @@ defaults = {
     "marcha_atras_kbd": False,  # estado del pulsador 'S' — sincronizado con el componente JS
     "ar_pasadas":       0,      # número de inversiones automáticas realizadas (auto-reverse)
     "caja_slow_prev":   {"cart": False, "end": False, "safety": True},  # estado anterior para detectar cambios
+    "trayectoria_ead_mm":     None,   # error de distancia (mm) calculado cada frame
+    "trayectoria_erumbo_deg": None,   # error de rumbo (°) calculado cada frame
 }
 
 for k, v in defaults.items():
     if k not in st.session_state:
         st.session_state[k] = v
 
+
+# ─── Funciones auxiliares de trayectoria GPS ────────────────────────────────
+
+_METROS_POR_GRADO_LAT = 111_320.0
+
+
+def _get_origen_latlon() -> tuple:
+    """Devuelve (lat_origen, lon_origen) según el modo de conexión activo en el sidebar."""
+    modo = st.session_state.get("k_conexion_modo", "ninguno")
+    if modo == "caja":
+        return (st.session_state.get("k_caja_lat", 40.4168),
+                st.session_state.get("k_caja_lon", -3.7038))
+    if modo == "gps":
+        return (st.session_state.get("k_gps_lat",  40.4168),
+                st.session_state.get("k_gps_lon",  -3.7038))
+    return (40.4168, -3.7038)
+
+
+def _parse_trayectoria(texto: str, lat_orig: float, lon_orig: float) -> list:
+    """
+    Convierte texto con un punto por línea (LAT×10⁷  LON×10⁷) a lista de (x_m, y_m)
+    en el sistema de coordenadas cartesianas del modelo (mismo origen que el GPS/caja).
+    """
+    metros_por_grado_lon = _METROS_POR_GRADO_LAT * math.cos(math.radians(lat_orig))
+    pts = []
+    for linea in texto.strip().splitlines():
+        partes = linea.strip().split()
+        if len(partes) < 2:
+            continue
+        try:
+            lat = int(partes[0]) / 1e7
+            lon = int(partes[1]) / 1e7
+            y = (lat - lat_orig) * _METROS_POR_GRADO_LAT
+            x = (lon - lon_orig) * metros_por_grado_lon
+            pts.append((x, y))
+        except (ValueError, ZeroDivisionError):
+            continue
+    return pts
+
+
+def _calcular_errores(gps_x: float, gps_y: float, tray_pts: list, trail: list) -> tuple:
+    """
+    Calcula EAd (error de distancia en mm) y Erumbo (error de rumbo en grados).
+
+    EAd    : distancia perpendicular mínima de la torre GPS al segmento de trayectoria más cercano.
+    Erumbo : diferencia de azimut entre el movimiento real de la torre GPS (del trail) y
+             el azimut del segmento más cercano.  0° = norte, 90° = este.  Rango: [-180, 180].
+    """
+    if len(tray_pts) < 2:
+        return None, None
+
+    # Encontrar el segmento más cercano a la posición GPS actual
+    min_dist = float("inf")
+    nearest_idx = 0
+    for i in range(len(tray_pts) - 1):
+        ax, ay = tray_pts[i]
+        bx, by = tray_pts[i + 1]
+        dx, dy = bx - ax, by - ay
+        L2 = dx * dx + dy * dy
+        if L2 == 0:
+            d = math.hypot(gps_x - ax, gps_y - ay)
+        else:
+            t = max(0.0, min(1.0, ((gps_x - ax) * dx + (gps_y - ay) * dy) / L2))
+            d = math.hypot(gps_x - (ax + t * dx), gps_y - (ay + t * dy))
+        if d < min_dist:
+            min_dist = d
+            nearest_idx = i
+
+    ead_mm = min_dist * 1000.0
+
+    # Azimut del segmento más cercano (atan2(delta_este, delta_norte) → 0° = norte)
+    ax, ay = tray_pts[nearest_idx]
+    bx, by = tray_pts[nearest_idx + 1]
+    azimut_objetivo = math.degrees(math.atan2(bx - ax, by - ay))
+
+    # Azimut actual: dirección del movimiento de la torre GPS en las últimas 2 posiciones del trail
+    erumbo = None
+    if trail and len(trail) >= 2:
+        px, py = trail[-2]
+        cx, cy = trail[-1]
+        ddx, ddy = cx - px, cy - py
+        if ddx * ddx + ddy * ddy > 1e-10:
+            azimut_actual = math.degrees(math.atan2(ddx, ddy))
+            diff = azimut_actual - azimut_objetivo
+            while diff >  180: diff -= 360
+            while diff < -180: diff += 360
+            erumbo = diff
+
+    return ead_mm, erumbo
+
+
+# ────────────────────────────────────────────────────────────────────────────
 
 # Sidebar: se renderiza una sola vez, nunca parpadea
 with st.sidebar:
@@ -305,6 +400,32 @@ with st.sidebar:
         st.caption("Arduino conectado a este PC · cable USB normal · Carr=2 (RTK FIX) fijo")
 
     st.divider()
+    st.markdown("##### Trayectoria objetivo GPS")
+    st.toggle(
+        "Activar trayectoria",
+        key="k_tray_activa",
+        help="Define los puntos de guiado que debe seguir la torre GPS. "
+             "Se visualiza en el campo y se calculan EAd y Erumbo en tiempo real.",
+    )
+    if state.get("k_tray_activa", False):
+        st.caption("Un punto por línea  ·  formato:  LAT×10⁷  LON×10⁷")
+        st.text_area(
+            "Puntos de trayectoria",
+            key="k_tray_input",
+            height=110,
+            label_visibility="collapsed",
+            placeholder="415191807 -37038000\n415195000 -37030000\n415200000 -37020000",
+        )
+        _lo_sb, _ln_sb = _get_origen_latlon()
+        _pts_sb = _parse_trayectoria(st.session_state.get("k_tray_input", ""), _lo_sb, _ln_sb)
+        if len(_pts_sb) >= 2:
+            st.caption(f"{len(_pts_sb)} puntos validos  ·  {len(_pts_sb) - 1} segmentos")
+        elif len(_pts_sb) == 1:
+            st.caption("Minimo 2 puntos para definir un segmento")
+        else:
+            st.caption("Introduce puntos en el formato indicado")
+
+    st.divider()
 
     # Controles
     if state.lineal is None:
@@ -456,7 +577,8 @@ def _torre_style(lineal: Lineal, i: int):
 
 
 def build_figure(lineal: Lineal | None, longitud_campo: float, pos_norte: float = 0.0,
-                 vista_general: bool = False, tower_trails: list | None = None) -> go.Figure:
+                 vista_general: bool = False, tower_trails: list | None = None,
+                 trayectoria_xy: list | None = None) -> go.Figure:
     if lineal is None:
         fig = go.Figure()
         fig.update_layout(
@@ -584,6 +706,37 @@ def build_figure(lineal: Lineal | None, longitud_campo: float, pos_norte: float 
                 hoverinfo="skip",
                 showlegend=False,
             ))
+
+    # Trayectoria objetivo GPS
+    _TRAY_COLOR = "#79c0ff"   
+    if trayectoria_xy and len(trayectoria_xy) >= 2:
+        tx = [p[0] for p in trayectoria_xy]
+        ty = [p[1] for p in trayectoria_xy]
+        # Línea de trayectoria 
+        traces.append(go.Scatter(
+            x=tx, y=ty,
+            mode="lines",
+            line=dict(color=_TRAY_COLOR, width=2, dash="dot"),
+            hoverinfo="skip",
+            showlegend=False,
+        ))
+        # Puntos de trayectoria con hover y etiqueta
+        traces.append(go.Scatter(
+            x=tx, y=ty,
+            mode="markers+text",
+            text=[f"P{i+1}" for i in range(len(trayectoria_xy))],
+            textposition="top center",
+            textfont=dict(color=_TRAY_COLOR, size=11, family="monospace"),
+            marker=dict(
+                color=_TRAY_COLOR, size=10, symbol="diamond",
+                line=dict(color="#0d1117", width=1.5),
+            ),
+            hovertemplate=[
+                f"<b>P{i+1}</b><br>X = {p[0]:.1f} m<br>Y = {p[1]:.1f} m<extra></extra>"
+                for i, p in enumerate(trayectoria_xy)
+            ],
+            showlegend=False,
+        ))
 
     # Tramos
     for idx, tramo in enumerate(lineal.tramos):
@@ -989,6 +1142,29 @@ def panel_principal():
                 st.rerun()
                 return
 
+    # EAd y Erumbo: se calculan en cada refresco (running o parado) si la trayectoria está activa
+    if state.get("k_tray_activa", False) and lineal is not None:
+        _lo_e, _ln_e = _get_origen_latlon()
+        _tray_e = _parse_trayectoria(state.get("k_tray_input", ""), _lo_e, _ln_e)
+        _gps_torre_e, _gps_idx_e = None, -1
+        if lineal.gps:
+            _gps_torre_e = lineal.gps.torre
+            _gps_idx_e   = lineal.torres.index(_gps_torre_e)
+        elif lineal.caja_interfaz:
+            _gps_torre_e = lineal.caja_interfaz.torre
+            _gps_idx_e   = lineal.torres.index(_gps_torre_e)
+        if _gps_torre_e is not None and len(_tray_e) >= 2:
+            _trail_e = (state.tower_trails[_gps_idx_e]
+                        if state.tower_trails and _gps_idx_e < len(state.tower_trails) else [])
+            _ead_e, _erm_e = _calcular_errores(
+                _gps_torre_e.posicion_x, _gps_torre_e.posicion_y, _tray_e, _trail_e)
+            state.trayectoria_ead_mm     = _ead_e
+            state.trayectoria_erumbo_deg = _erm_e
+        else:
+            state.trayectoria_ead_mm = state.trayectoria_erumbo_deg = None
+    else:
+        state.trayectoria_ead_mm = state.trayectoria_erumbo_deg = None
+
     # CABECERA
     st.markdown("# Gemelo Digital Lineal")
 
@@ -1264,19 +1440,46 @@ def panel_principal():
                     )
 
     # FIGURA
-    _col_tog, _ = st.columns([1, 5])
+    _col_tog, _col_ead, _col_erm, _ = st.columns([1, 1, 1, 3])
     with _col_tog:
         st.toggle(
             "Vista general",
             key="k_vista_general",
             help="OFF → escala 1:1 siguiendo al lineal  ·  ON → campo completo",
         )
+    if state.get("k_tray_activa", False):
+        _ead_v = state.get("trayectoria_ead_mm")
+        _erm_v = state.get("trayectoria_erumbo_deg")
+        with _col_ead:
+            st.metric(
+                "EAd",
+                f"{_ead_v:.0f} mm" if _ead_v is not None else "—",
+                help="Error de distancia: distancia perpendicular de la torre GPS "
+                     "al segmento de trayectoria más cercano",
+            )
+        with _col_erm:
+            st.metric(
+                "Erumbo",
+                f"{_erm_v:+.1f}°" if _erm_v is not None else "—",
+                help="Error de rumbo: diferencia entre el azimut de movimiento real "
+                     "de la torre GPS y el azimut del segmento objetivo "
+                     "(0° = norte, + = desviado a la derecha, − = a la izquierda)",
+            )
+
     _pos = lineal.posicion_norte if lineal is not None else 0.0
+    # Preparar trayectoria para la figura
+    _tray_fig = None
+    if state.get("k_tray_activa", False) and lineal is not None:
+        _lo_fig, _ln_fig = _get_origen_latlon()
+        _pts_fig = _parse_trayectoria(state.get("k_tray_input", ""), _lo_fig, _ln_fig)
+        _tray_fig = _pts_fig if len(_pts_fig) >= 2 else None
+
     st.plotly_chart(
         build_figure(
             lineal, longitud_campo, _pos,
             st.session_state.get("k_vista_general", False),
             tower_trails=state.tower_trails,
+            trayectoria_xy=_tray_fig,
         ),
         width="stretch",
         key="campo_pivot",
