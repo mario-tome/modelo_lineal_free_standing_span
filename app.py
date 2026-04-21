@@ -3,6 +3,7 @@ streamlit run app.py
 """
 import csv
 import io
+import math
 import os
 import pandas as pd
 import streamlit as st
@@ -108,18 +109,110 @@ defaults = {
     "pos_prev":        0.0,    # posicion_norte del frame anterior
     "tramos_ok_prev":  None,   # estado de alineacion anterior para detectar cambios
     "k_vista_general": False,  # True = campo completo, False = seguir lineal 1:1
-    "giro_modo":        None,   # None | 'izq' | 'der'  — giro manual del pivot
     "tower_trails":     None,   # list[list[(x,y)]] — histórico de posiciones por torre
-    "giro_rail_x":      None,   # (x_cart, x_end) antes de iniciar giro → se restaura al parar
     "marcha_atras_kbd": False,  # estado del pulsador 'S' — sincronizado con el componente JS
     "ar_pasadas":       0,      # número de inversiones automáticas realizadas (auto-reverse)
     "caja_slow_prev":   {"cart": False, "end": False, "safety": True},  # estado anterior para detectar cambios
+    "trayectoria_ead_mm":     None,   # error de distancia (mm) calculado cada frame
+    "trayectoria_erumbo_deg": None,   # error de rumbo (°) calculado cada frame
 }
 
 for k, v in defaults.items():
     if k not in st.session_state:
         st.session_state[k] = v
 
+
+# ─── Funciones auxiliares de trayectoria GPS ────────────────────────────────
+
+_METROS_POR_GRADO_LAT = 111_320.0
+
+
+def _get_origen_latlon() -> tuple:
+    """Devuelve (lat_origen, lon_origen) según el modo de conexión activo en el sidebar."""
+    modo = st.session_state.get("k_conexion_modo", "ninguno")
+    if modo == "caja":
+        return (st.session_state.get("k_caja_lat", 40.4168),
+                st.session_state.get("k_caja_lon", -3.7038))
+    if modo == "gps":
+        return (st.session_state.get("k_gps_lat",  40.4168),
+                st.session_state.get("k_gps_lon",  -3.7038))
+    return (40.4168, -3.7038)
+
+
+def _parse_trayectoria(texto: str, lat_orig: float, lon_orig: float) -> list:
+    """
+    Convierte texto con un punto por línea (LAT×10⁷  LON×10⁷) a lista de (x_m, y_m)
+    en el sistema de coordenadas cartesianas del modelo (mismo origen que el GPS/caja).
+    """
+    metros_por_grado_lon = _METROS_POR_GRADO_LAT * math.cos(math.radians(lat_orig))
+    pts = []
+    for linea in texto.strip().splitlines():
+        partes = linea.strip().split()
+        if len(partes) < 2:
+            continue
+        try:
+            lat = int(partes[0]) / 1e7
+            lon = int(partes[1]) / 1e7
+            y = (lat - lat_orig) * _METROS_POR_GRADO_LAT
+            x = (lon - lon_orig) * metros_por_grado_lon
+            pts.append((x, y))
+        except (ValueError, ZeroDivisionError):
+            continue
+    return pts
+
+
+def _calcular_errores(gps_x: float, gps_y: float, tray_pts: list, trail: list) -> tuple:
+    """
+    Calcula EΔd (error de distancia en mm) y EΔrumbo (error de rumbo en grados).
+
+    EΔd    : distancia perpendicular mínima de la torre GPS al segmento de trayectoria más cercano.
+    EΔrumbo: diferencia de azimut entre el movimiento real de la torre GPS (del trail) y
+             el azimut del segmento más cercano.  0° = norte, 90° = este.  Rango: [-180, 180].
+    """
+    if len(tray_pts) < 2:
+        return None, None
+
+    # Encontrar el segmento más cercano a la posición GPS actual
+    min_dist = float("inf")
+    nearest_idx = 0
+    for i in range(len(tray_pts) - 1):
+        ax, ay = tray_pts[i]
+        bx, by = tray_pts[i + 1]
+        dx, dy = bx - ax, by - ay
+        L2 = dx * dx + dy * dy
+        if L2 == 0:
+            d = math.hypot(gps_x - ax, gps_y - ay)
+        else:
+            t = max(0.0, min(1.0, ((gps_x - ax) * dx + (gps_y - ay) * dy) / L2))
+            d = math.hypot(gps_x - (ax + t * dx), gps_y - (ay + t * dy))
+        if d < min_dist:
+            min_dist = d
+            nearest_idx = i
+
+    ead_mm = min_dist * 1000.0
+
+    # Azimut del segmento más cercano (atan2(delta_este, delta_norte) → 0° = norte)
+    ax, ay = tray_pts[nearest_idx]
+    bx, by = tray_pts[nearest_idx + 1]
+    azimut_objetivo = math.degrees(math.atan2(bx - ax, by - ay))
+
+    # Azimut actual: dirección del movimiento de la torre GPS en las últimas 2 posiciones del trail
+    erumbo = None
+    if trail and len(trail) >= 2:
+        px, py = trail[-2]
+        cx, cy = trail[-1]
+        ddx, ddy = cx - px, cy - py
+        if ddx * ddx + ddy * ddy > 1e-10:
+            azimut_actual = math.degrees(math.atan2(ddx, ddy))
+            diff = azimut_actual - azimut_objetivo
+            while diff >  180: diff -= 360
+            while diff < -180: diff += 360
+            erumbo = diff
+
+    return ead_mm, erumbo
+
+
+# ────────────────────────────────────────────────────────────────────────────
 
 # Sidebar: se renderiza una sola vez, nunca parpadea
 with st.sidebar:
@@ -307,6 +400,32 @@ with st.sidebar:
         st.caption("Arduino conectado a este PC · cable USB normal · Carr=2 (RTK FIX) fijo")
 
     st.divider()
+    st.markdown("##### Trayectoria objetivo GPS")
+    st.toggle(
+        "Activar trayectoria",
+        key="k_tray_activa",
+        help="Define los puntos de guiado que debe seguir la torre GPS. "
+             "Se visualiza en el campo y se calculan EΔd y EΔrumbo en tiempo real.",
+    )
+    if state.get("k_tray_activa", False):
+        st.caption("Un punto por línea  ·  formato:  LAT×10⁷  LON×10⁷")
+        st.text_area(
+            "Puntos de trayectoria",
+            key="k_tray_input",
+            height=110,
+            label_visibility="collapsed",
+            placeholder="415191807 -37038000\n415195000 -37030000\n415200000 -37020000",
+        )
+        _lo_sb, _ln_sb = _get_origen_latlon()
+        _pts_sb = _parse_trayectoria(st.session_state.get("k_tray_input", ""), _lo_sb, _ln_sb)
+        if len(_pts_sb) >= 2:
+            st.caption(f"{len(_pts_sb)} puntos validos  ·  {len(_pts_sb) - 1} segmentos")
+        elif len(_pts_sb) == 1:
+            st.caption("Minimo 2 puntos para definir un segmento")
+        else:
+            st.caption("Introduce puntos en el formato indicado")
+
+    st.divider()
 
     # Controles
     if state.lineal is None:
@@ -349,7 +468,6 @@ with st.sidebar:
             state.running         = True
             state.finished        = False
             state.paused          = False
-            state.giro_modo       = None
             state.caja_slow_prev  = {"cart": False, "end": False, "safety": True}
             state.tower_trails    = [[] for _ in range(len(state.lineal.torres))]
             st.rerun()
@@ -365,7 +483,6 @@ with st.sidebar:
                                "msg": f"Sistema pausado en {state.lineal.posicion_norte:.2f} m"})
             state.running   = False
             state.paused    = True
-            state.giro_modo = None
             st.rerun()
 
     elif state.paused and not state.finished:
@@ -401,8 +518,8 @@ with st.sidebar:
     st.divider()
     st.markdown("##### Teclado (simulación activa)")
     for _key, _desc in [
-        ("< (mantener)", "Giro izq — Cart lento (pivote), End-tower barre arco"),
-        ("- (mantener)", "Giro der — End-tower lento (pivote), Cart barre arco"),
+        ("< (mantener)", "Ralentiza Cart — sigue motor rápido, giro gradual izquierda"),
+        ("- (mantener)", "Ralentiza End-tower — sigue motor rápido, giro gradual derecha"),
         ("R (pulsar)",   "Marcha atrás / avance normal"),
     ]:
         st.markdown(
@@ -413,25 +530,6 @@ with st.sidebar:
         )
 
     st.divider()
-    st.markdown("##### Leyenda")
-    for color, name, desc in [
-        ("#f78166", "Guia Izq (Cart)",   "Motor + set speed · cascada izq"),
-        ("#d2a8ff", "End-tower",        "Motor + set speed · cascada der"),
-        ("#58a6ff", "Intermedia izq",   "Sigue guia izquierda"),
-        ("#56d364", "Intermedia der",   "Sigue guia derecha"),
-        ("#ffa657", "Motor rapido [R]", "Extremo der del tramo rigido"),
-        ("#ffa657", "Zona rigida",      "Free Standing Span central"),
-        ("#3fb950", "Alineado",         "Desv < 5 cm, angulo < 0.5 grd"),
-        ("#e3b341", "Advertencia",      "Desv < 5 cm, angulo >= 0.5 grd"),
-        ("#f85149", "Desalineado",      "Desv >= 5 cm"),
-        ("#58d68d", "GPS activo",       "Torre con unidad GPS"),
-    ]:
-        st.markdown(
-            f"<span style='display:inline-block;width:10px;height:10px;"
-            f"border-radius:50%;background:{color};margin-right:8px;vertical-align:middle'></span>"
-            f"<b>{name}</b> <span style='color:#8b949e;font-size:0.82rem'>— {desc}</span>",
-            unsafe_allow_html=True,
-        )
 
 
 # Funciones de la figura Plotly (definidas fuera del fragment)
@@ -461,7 +559,7 @@ def _torre_style(lineal: Lineal, i: int):
 
 def build_figure(lineal: Lineal | None, longitud_campo: float, pos_norte: float = 0.0,
                  vista_general: bool = False, tower_trails: list | None = None,
-                 giro_modo: str | None = None) -> go.Figure:
+                 trayectoria_xy: list | None = None) -> go.Figure:
     if lineal is None:
         fig = go.Figure()
         fig.update_layout(
@@ -590,38 +688,35 @@ def build_figure(lineal: Lineal | None, longitud_campo: float, pos_norte: float 
                 showlegend=False,
             ))
 
-    # Líneas de referencia del giro activo
-    if giro_modo is not None:
-        _y_lider   = (lineal.torres[0].posicion_y  if giro_modo == 'izq'
-                      else lineal.torres[-1].posicion_y)
-        _y_rezagado = (lineal.torres[-1].posicion_y if giro_modo == 'izq'
-                       else lineal.torres[0].posicion_y)
-        _delta_giro = abs(_y_lider - _y_rezagado)
-
-        # Frente lider: donde estaría el lineal si fuera recto
+    # Trayectoria objetivo GPS
+    _TRAY_COLOR = "#79c0ff"   
+    if trayectoria_xy and len(trayectoria_xy) >= 2:
+        tx = [p[0] for p in trayectoria_xy]
+        ty = [p[1] for p in trayectoria_xy]
+        # Línea de trayectoria 
         traces.append(go.Scatter(
-            x=[0, fw], y=[_y_lider, _y_lider],
+            x=tx, y=ty,
             mode="lines",
-            line=dict(color="rgba(255,255,255,0.28)", width=1, dash="dash"),
-            hoverinfo="skip", showlegend=False,
+            line=dict(color=_TRAY_COLOR, width=2, dash="dot"),
+            hoverinfo="skip",
+            showlegend=False,
         ))
-        # Guía rezagada: ancla del giro
+        # Puntos de trayectoria con hover y etiqueta
         traces.append(go.Scatter(
-            x=[0, fw], y=[_y_rezagado, _y_rezagado],
-            mode="lines",
-            line=dict(color="rgba(255,200,100,0.22)", width=1, dash="dot"),
-            hoverinfo="skip", showlegend=False,
-        ))
-        # 'der' = Cart es pivote = lado izquierdo lento = giro izquierda (tecla <)
-        # 'izq' = End-tower es pivote = lado derecho lento = giro derecha (tecla -)
-        _dir_txt = "◀ GIRO IZQ" if giro_modo == 'der' else "GIRO DER ▶"
-        annotations.append(dict(
-            x=fw * 0.5, y=_y_lider,
-            xref="x", yref="y",
-            text=f"<b>{_dir_txt}  ·  Δ {_delta_giro:.2f} m</b>",
-            showarrow=False, yanchor="bottom",
-            font=dict(color="rgba(255,255,255,0.55)", size=11, family="monospace"),
-            bgcolor="rgba(13,17,23,0.0)", borderwidth=0,
+            x=tx, y=ty,
+            mode="markers+text",
+            text=[f"P{i+1}" for i in range(len(trayectoria_xy))],
+            textposition="top center",
+            textfont=dict(color=_TRAY_COLOR, size=11, family="monospace"),
+            marker=dict(
+                color=_TRAY_COLOR, size=10, symbol="diamond",
+                line=dict(color="#0d1117", width=1.5),
+            ),
+            hovertemplate=[
+                f"<b>P{i+1}</b><br>X = {p[0]:.1f} m<br>Y = {p[1]:.1f} m<extra></extra>"
+                for i, p in enumerate(trayectoria_xy)
+            ],
+            showlegend=False,
         ))
 
     # Tramos
@@ -700,8 +795,21 @@ def build_figure(lineal: Lineal | None, longitud_campo: float, pos_norte: float 
             nombre = f"Intermedia {i}  [cascada derecha]"
 
         cont_cerrado = torre.contactor.esta_cerrado
+
+        # Detectar si esta torre guía está en modo slow_down (duty cycle reducido al 25%).
+        # El flag vive en lineal directamente — lo activa la caja Arduino O el teclado.
+        _en_slow_down = (
+            isinstance(torre, Torre_Guia) and (
+                (i == 0                      and lineal.slow_down_cart)      or
+                (i == len(lineal.torres) - 1 and lineal.slow_down_end_tower)
+            )
+        )
+
         if isinstance(torre, Torre_Guia):
-            cont_txt = f"Contactor: {'ON' if cont_cerrado else 'OFF'}  (set speed {torre.contactor.duty_cycle*100:.0f}%)"
+            if _en_slow_down:
+                cont_txt = f"Contactor: {'ON' if cont_cerrado else 'OFF'}  (sigue motor rápido)"
+            else:
+                cont_txt = f"Contactor: {'ON' if cont_cerrado else 'OFF'}  (set speed {torre.contactor.duty_cycle*100:.0f}%)"
         else:
             cont_txt = f"Contactor: {'ON — desalineada' if cont_cerrado else 'OFF — alineada'}"
 
@@ -725,8 +833,14 @@ def build_figure(lineal: Lineal | None, longitud_campo: float, pos_norte: float 
         borde_color = "#3fb950" if cont_cerrado else "#484f58"
 
         if isinstance(torre, Torre_Guia):
-            estado_txt   = f"Speed {torre.contactor.duty_cycle*100:.0f}%  {'ON' if cont_cerrado else 'OFF'}"
-            estado_color = color
+            if _en_slow_down:
+                if cont_cerrado:
+                    estado_txt, estado_color = "Motor ON  ·  (sigue rápido)", "#e3b341"
+                else:
+                    estado_txt, estado_color = "Motor OFF  ·  (sigue rápido)", "#8b949e"
+            else:
+                estado_txt   = f"Speed {torre.contactor.duty_cycle*100:.0f}%  {'ON' if cont_cerrado else 'OFF'}"
+                estado_color = color
         else:
             if cont_cerrado:
                 estado_txt, estado_color = "Corrigiendo  ·  Motor ON", "#e3b341"
@@ -850,26 +964,30 @@ def panel_principal():
         lineal.guia_izquierda.ruido_lateral = _ruido_live
         lineal.guia_derecha.ruido_lateral   = _ruido_live
 
-    # Caja de interfaz: sincroniza giro_modo con los comandos del algoritmo de guiado
+    # Caja de interfaz: procesa comandos del algoritmo de guiado GPS
     if state.running and lineal is not None and lineal.caja_interfaz:
         caja  = lineal.caja_interfaz
         prev  = state.caja_slow_prev
 
-        # Detectar cambios y registrarlos en el log
+        # Detectar cambios de slow_down y registrarlos en el log
         if caja.slow_down_cart != prev["cart"]:
             prev["cart"] = caja.slow_down_cart
             state.log.append({
                 "t": lineal._tiempo_formateado(), "tipo": "INFO",
-                "msg": ("SLOW_DOWN_CART ON — giro izquierda activado"
-                        if caja.slow_down_cart else "SLOW_DOWN_CART OFF — Cart liberado"),
+                "msg": ("SLOW_DOWN_CART ON — Cart ralentizado, giro gradual hacia izquierda"
+                        if caja.slow_down_cart else "SLOW_DOWN_CART OFF — Cart a velocidad normal"),
             })
         if caja.slow_down_end_tower != prev["end"]:
             prev["end"] = caja.slow_down_end_tower
             state.log.append({
                 "t": lineal._tiempo_formateado(), "tipo": "INFO",
-                "msg": ("SLOW_DOWN_END_TOWER ON — giro derecha activado"
-                        if caja.slow_down_end_tower else "SLOW_DOWN_END_TOWER OFF — End-tower liberado"),
+                "msg": ("SLOW_DOWN_END_TOWER ON — End-tower ralentizado, giro gradual hacia derecha"
+                        if caja.slow_down_end_tower else "SLOW_DOWN_END_TOWER OFF — End-tower a velocidad normal"),
             })
+
+        # Propagar los flags de la caja al modelo para que avanza() los lea
+        lineal.slow_down_cart      = caja.slow_down_cart
+        lineal.slow_down_end_tower = caja.slow_down_end_tower
 
         if not caja.safety_ok and prev["safety"]:
             prev["safety"] = False
@@ -887,26 +1005,10 @@ def panel_principal():
                 "msg": "SAFETY_OK — seguridad restaurada (reanuda manualmente)",
             })
 
-        # Calcular nuevo giro y aplicar si cambió
-        _nuevo_giro = ('der' if caja.slow_down_cart and not caja.slow_down_end_tower
-                       else ('izq' if caja.slow_down_end_tower and not caja.slow_down_cart
-                             else None))
-        if _nuevo_giro != state.giro_modo:
-            _prev_giro = state.giro_modo
-            state.giro_modo = _nuevo_giro
-            if _nuevo_giro in ('izq', 'der'):
-                # Guardar rail y alinear intermedias antes del giro
-                state.giro_rail_x = (lineal.torres[0].posicion_x, lineal.torres[-1].posicion_x)
-                lineal.resetear_arco_giro()
-            elif _prev_giro in ('izq', 'der'):
-                # Giro terminado: recalcular X de intermedias
-                lineal._actualizar_posiciones_x()
-                state.giro_rail_x = None
-
     # Avance de simulacion
     if state.running and not state.finished and lineal is not None:
         sim_spd_val = state.get("k_simspd", 60)
-        lineal.avanza(sim_spd_val, transmitir_gps=False, modo_giro=state.giro_modo)
+        lineal.avanza(sim_spd_val, transmitir_gps=False)
         # GPS: el hilo background (iniciado en INICIAR) transmite por su cuenta
 
         # Registro de trayectorias para el renderizado
@@ -922,16 +1024,49 @@ def panel_principal():
 
         # Fila para CSV
         fila = {
-            "tiempo_s":        lineal.tiempo_total_segundos,
-            "tiempo":          lineal._tiempo_formateado(),
-            "posicion_norte":  round(lineal.posicion_norte, 3),
-            "alineado":        lineal.esta_alineado,
+            "tiempo_s":       lineal.tiempo_total_segundos,
+            "tiempo":         lineal._tiempo_formateado(),
+            "posicion_norte": round(lineal.posicion_norte, 3),
+            "slow_cart":      lineal.slow_down_cart,
+            "slow_end_tower": lineal.slow_down_end_tower,
         }
+        # Columnas intercaladas por orden del lineal: torre_j_x/y → métricas del tramo j+1
+        L_nominal = lineal.longitud_tramo
         for j, t in enumerate(lineal.torres):
-            fila[f"torre_{j}_y"] = round(t.posicion_y, 3)
+            fila[f"torre_{j}_x"] = round(t.posicion_x, 4)
+            fila[f"torre_{j}_y"] = round(t.posicion_y, 4)
+            if j < lineal.numero_tramos:
+                tramo  = lineal.tramos[j]
+                dx     = tramo.torre_derecha.posicion_x - tramo.torre_izquierda.posicion_x
+                dy     = tramo.desviacion_norte
+                L_calc = round((dx**2 + dy**2) ** 0.5, 4)
+                fila[f"tramo_{j+1}_L_calculado"] = L_calc
+                fila[f"tramo_{j+1}_deform_m"]    = round(L_nominal - L_calc, 4)
+                fila[f"tramo_{j+1}_desv_y"]      = round(dy, 4)
+                fila[f"tramo_{j+1}_rumbo_deg"]   = round(tramo.angulo_grados, 4)
         if lineal.gps:
             fila["lat_e7"] = lineal.gps.lat_e7
             fila["lon_e7"] = lineal.gps.lon_e7
+        # Errores de trayectoria GPS (calculados con la posición actual del frame)
+        if state.get("k_tray_activa", False):
+            _lo_c, _ln_c = _get_origen_latlon()
+            _tray_c = _parse_trayectoria(state.get("k_tray_input", ""), _lo_c, _ln_c)
+            _gt_c, _gi_c = None, -1
+            if lineal.gps:
+                _gt_c = lineal.gps.torre
+                _gi_c = lineal.torres.index(_gt_c)
+            elif lineal.caja_interfaz:
+                _gt_c = lineal.caja_interfaz.torre
+                _gi_c = lineal.torres.index(_gt_c)
+            if _gt_c is not None and len(_tray_c) >= 2:
+                _tr_c = (state.tower_trails[_gi_c]
+                         if state.tower_trails and _gi_c < len(state.tower_trails) else [])
+                _ed_c, _er_c = _calcular_errores(
+                    _gt_c.posicion_x, _gt_c.posicion_y, _tray_c, _tr_c)
+                fila["EΔd_mm"]      = round(_ed_c, 1) if _ed_c is not None else None
+                fila["EΔrumbo_deg"] = round(_er_c, 2) if _er_c is not None else None
+            else:
+                fila["EΔd_mm"] = fila["EΔrumbo_deg"] = None
         state.historial.append(fila)
 
         # GPS track (últimas 20 lecturas)
@@ -1006,6 +1141,29 @@ def panel_principal():
                 state.finished = True
                 st.rerun()
                 return
+
+    # EΔd y EΔrumbo: se calculan en cada refresco (running o parado) si la trayectoria está activa
+    if state.get("k_tray_activa", False) and lineal is not None:
+        _lo_e, _ln_e = _get_origen_latlon()
+        _tray_e = _parse_trayectoria(state.get("k_tray_input", ""), _lo_e, _ln_e)
+        _gps_torre_e, _gps_idx_e = None, -1
+        if lineal.gps:
+            _gps_torre_e = lineal.gps.torre
+            _gps_idx_e   = lineal.torres.index(_gps_torre_e)
+        elif lineal.caja_interfaz:
+            _gps_torre_e = lineal.caja_interfaz.torre
+            _gps_idx_e   = lineal.torres.index(_gps_torre_e)
+        if _gps_torre_e is not None and len(_tray_e) >= 2:
+            _trail_e = (state.tower_trails[_gps_idx_e]
+                        if state.tower_trails and _gps_idx_e < len(state.tower_trails) else [])
+            _ead_e, _erm_e = _calcular_errores(
+                _gps_torre_e.posicion_x, _gps_torre_e.posicion_y, _tray_e, _trail_e)
+            state.trayectoria_ead_mm     = _ead_e
+            state.trayectoria_erumbo_deg = _erm_e
+        else:
+            state.trayectoria_ead_mm = state.trayectoria_erumbo_deg = None
+    else:
+        state.trayectoria_ead_mm = state.trayectoria_erumbo_deg = None
 
     # CABECERA
     st.markdown("# Gemelo Digital Lineal")
@@ -1086,8 +1244,16 @@ def panel_principal():
         cols_m[2].metric("Posición media",  f"{lineal.posicion_norte:.2f} m")
         cols_m[3].metric("Recorrido",       f"{porcentaje:.1f} %")
         cols_m[4].metric("Alineación",      "OK" if lineal.esta_alineado else "Corrigiendo")
-        cols_m[5].metric("Guia Izq (Cart)", "ON" if lineal.guia_izquierda.contactor.esta_cerrado else "OFF")
-        cols_m[6].metric("End-tower",       "ON" if lineal.guia_derecha.contactor.esta_cerrado else "OFF")
+        _slow_c = lineal.slow_down_cart
+        _slow_e = lineal.slow_down_end_tower
+        _cart_val = ("★ ON" if lineal.guia_izquierda.contactor.esta_cerrado else "★ OFF") if _slow_c else \
+                    ("ON"   if lineal.guia_izquierda.contactor.esta_cerrado else "OFF")
+        _end_val  = ("★ ON" if lineal.guia_derecha.contactor.esta_cerrado   else "★ OFF") if _slow_e else \
+                    ("ON"   if lineal.guia_derecha.contactor.esta_cerrado   else "OFF")
+        cols_m[5].metric("Guia Izq (Cart)", _cart_val,
+                          help="★ = en slow_down, sigue al motor rápido" if _slow_c else None)
+        cols_m[6].metric("End-tower",       _end_val,
+                          help="★ = en slow_down, sigue al motor rápido" if _slow_e else None)
         cols_m[7].metric("Vel. real",       f"{vel_real:.2f} m/min",
                           delta=f"{delta_vel:+.2f} vs teórica",
                           delta_color="normal")
@@ -1274,20 +1440,46 @@ def panel_principal():
                     )
 
     # FIGURA
-    _col_tog, _ = st.columns([1, 5])
+    _col_tog, _col_ead, _col_erm, _ = st.columns([1, 1, 1, 3])
     with _col_tog:
         st.toggle(
             "Vista general",
             key="k_vista_general",
             help="OFF → escala 1:1 siguiendo al lineal  ·  ON → campo completo",
         )
+    if state.get("k_tray_activa", False):
+        _ead_v = state.get("trayectoria_ead_mm")
+        _erm_v = state.get("trayectoria_erumbo_deg")
+        with _col_ead:
+            st.metric(
+                "EΔd",
+                f"{_ead_v:.0f} mm" if _ead_v is not None else "—",
+                help="Error Δ distancia: desviación perpendicular de la torre GPS "
+                     "respecto al segmento de trayectoria más cercano",
+            )
+        with _col_erm:
+            st.metric(
+                "EΔrumbo",
+                f"{_erm_v:+.1f}°" if _erm_v is not None else "—",
+                help="Error Δ rumbo: diferencia entre el azimut de movimiento real "
+                     "de la torre GPS y el azimut del segmento objetivo "
+                     "(0° = norte, + = desviado a la derecha, − = a la izquierda)",
+            )
+
     _pos = lineal.posicion_norte if lineal is not None else 0.0
+    # Preparar trayectoria para la figura
+    _tray_fig = None
+    if state.get("k_tray_activa", False) and lineal is not None:
+        _lo_fig, _ln_fig = _get_origen_latlon()
+        _pts_fig = _parse_trayectoria(state.get("k_tray_input", ""), _lo_fig, _ln_fig)
+        _tray_fig = _pts_fig if len(_pts_fig) >= 2 else None
+
     st.plotly_chart(
         build_figure(
             lineal, longitud_campo, _pos,
             st.session_state.get("k_vista_general", False),
             tower_trails=state.tower_trails,
-            giro_modo=state.giro_modo,
+            trayectoria_xy=_tray_fig,
         ),
         width="stretch",
         key="campo_pivot",
@@ -1302,9 +1494,6 @@ def panel_principal():
 
 # Componente de teclado (bidireccional real, iframe persistente).
 # Devuelve {left, right, reverse} en cada cambio de tecla.
-#   < (mantener) → giro izq  — Cart es pivote, End-tower barre arco
-#   - (mantener) → giro der  — End-tower es pivote, Cart barre arco
-#   R (toggle)   → marcha atrás / avance normal
 _key_giro = _giro_kbd(default=None)
 if isinstance(_key_giro, dict):
 
@@ -1323,40 +1512,28 @@ if isinstance(_key_giro, dict):
                 "msg":  _dir_txt,
             })
 
-    # Giro (teclas < y -): izquierda → Cart pivota, derecha → End-tower pivota
-    _prev = st.session_state.giro_modo
-    _new  = ("der" if _key_giro.get("left")
-             else ("izq" if _key_giro.get("right") else None))
-    if _new != _prev:
-        st.session_state.giro_modo = _new
-        if st.session_state.lineal and st.session_state.running:
-            _lin = st.session_state.lineal
+    # Ralentización por teclado: < → ralentiza Cart  /  - → ralentiza End-tower
+    # Mismo comportamiento que SLOW_DOWN desde la caja Arduino: el extremo ralentizado
+    # avanza a SLOW_DOWN_FACTOR × duty_cycle normal; intermedias siguen la diagonal.
+    if st.session_state.lineal and st.session_state.running:
+        _lin         = st.session_state.lineal
+        _slow_c_kbd  = bool(_key_giro.get("left",  False))
+        _slow_e_kbd  = bool(_key_giro.get("right", False))
 
-            if _new in ('izq', 'der'):
-                # Guardar posiciones X del carril antes del giro
-                st.session_state.giro_rail_x = (
-                    _lin.torres[0].posicion_x,
-                    _lin.torres[-1].posicion_x,
-                )
-                # Snap al arco: elimina kinks heredados de operación normal
-                _lin.resetear_arco_giro()
-                # Los trails NO se limpian: el historial es continuo (normal + giro + vuelta)
-
-            elif _prev in ('izq', 'der') and _new is None:
-                # Giro terminado: el lineal continúa desde donde el arco dejó las guías.
-                # No se restauran las X — cada guía sigue en su nueva posición y avanza
-                # desde ahí. Solo recalculamos X de intermedios para consistencia.
-                _lin._actualizar_posiciones_x()
-                st.session_state.giro_rail_x = None
-
-            # 'der' = Cart es pivote = lado izquierdo lento (tecla <)
-            # 'izq' = End-tower es pivote = lado derecho lento (tecla -)
-            _lado_txt = "izquierda" if _new == 'der' else ("derecha" if _new == 'izq' else "")
+        # Solo actualizar si hay cambio (evita escribir en cada tick sin cambio)
+        if _slow_c_kbd != _lin.slow_down_cart or _slow_e_kbd != _lin.slow_down_end_tower:
+            _lin.slow_down_cart      = _slow_c_kbd
+            _lin.slow_down_end_tower = _slow_e_kbd
+            if _slow_c_kbd:
+                _msg = "Teclado < — Cart ralentizado, giro gradual hacia izquierda"
+            elif _slow_e_kbd:
+                _msg = "Teclado - — End-tower ralentizado, giro gradual hacia derecha"
+            else:
+                _msg = "Teclado liberado — velocidad normal"
             st.session_state.log.append({
                 "t":    _lin._tiempo_formateado(),
                 "tipo": "INFO",
-                "msg":  (f"Giro {_lado_txt} activado  (pivota lado {_lado_txt})"
-                         if _new else "Giro detenido — avance normal"),
+                "msg":  _msg,
             })
 
 panel_principal()
