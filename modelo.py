@@ -1,24 +1,27 @@
 import math, random, threading, time as _time
 
-def avanzar_en_circunferencia(x_c, y_c, r, x_i, y_i, d):
+def avanzar_en_circunferencia(centro_x, centro_y, radio, inicio_x, inicio_y, distancia):
     """
-    Posición final de un móvil que recorre distancia d sobre una circunferencia
-    d > 0 = sentido antihorario, d < 0 = sentido horario
+    Posición final de un móvil que recorre una distancia sobre una circunferencia.
+    distancia > 0 = sentido antihorario, distancia < 0 = sentido horario
     """
-    angulo_inicial = math.atan2(y_i - y_c, x_i - x_c)
-    angulo_recorrido = d / r
-    angulo_final = angulo_inicial + angulo_recorrido
-    
-    x_f = x_c + r * math.cos(angulo_final)
-    y_f = y_c + r * math.sin(angulo_final)
-    
-    return x_f, y_f
+    angulo_inicial   = math.atan2(inicio_y - centro_y, inicio_x - centro_x)
+    angulo_recorrido = distancia / radio
+    angulo_final     = angulo_inicial + angulo_recorrido
+
+    x_final = centro_x + radio * math.cos(angulo_final)
+    y_final  = centro_y + radio * math.sin(angulo_final)
+
+    return x_final, y_final
 
 try:
     import serial as _serial_module
     _SERIAL_DISPONIBLE = True
 except ImportError:
     _SERIAL_DISPONIBLE = False
+
+# Constante geográfica
+METROS_POR_GRADO_LAT = 111_320.0  # 1 grado de latitud ≈ 111 320 m
 
 
 # Conecta/desconecta el motor de una torre
@@ -128,15 +131,15 @@ class Torre_Intermedia(Torre):
                 if self.es_motor_rapido
                 else self.FACTOR_SOBREVELOCIDAD)
 
-    def seguir(self, y_target: float, segundos: float,
+    def seguir(self, y_objetivo: float, segundos: float,
                direccion: int = 1,
                pivot_x: float = None, pivot_y: float = None) -> float:
         """
-        Activa cuando está ≥10 cm por detrás del objetivo (y_target)
+        Activa cuando está ≥10 cm por detrás del objetivo (y_objetivo)
         Avanza a velocidad nominal completa y para cuando supera el objetivo en ≥10 cm
         Si se pasan pivot_x/pivot_y, la torre avanza sobre el arco de circunferencia centrado en el pivote radio = longitud_tramo
         """
-        desviacion = (y_target - self.posicion_y) * direccion  # + atrasada, - adelantada
+        desviacion = (y_objetivo - self.posicion_y) * direccion  # + atrasada, - adelantada
 
         if desviacion >= self.UMBRAL_ARRANQUE:
             self.contactor.cerrar()
@@ -150,13 +153,13 @@ class Torre_Intermedia(Torre):
         metros_avanzados = (self.velocidad_nominal * self.factor_sobrevelocidad * (segundos / 60.0) * factor_patinaje)
 
         if pivot_x is not None and pivot_y is not None:
-            # Lado izquierdo: torre a la DERECHA del pivote = antihorario = norte = d positivo
-            # Lado derecho: torre a la IZQUIERDA del pivote = horario = norte = d negativo
-            d_sign = 1 if self.posicion_x > pivot_x else -1
-            d = metros_avanzados * direccion * d_sign
+            # Lado izquierdo: torre a la DERECHA del pivote = antihorario = norte = distancia positiva
+            # Lado derecho: torre a la IZQUIERDA del pivote = horario = norte = distancia negativa
+            signo_avance   = 1 if self.posicion_x > pivot_x else -1
+            distancia_arco = metros_avanzados * direccion * signo_avance
             self.posicion_x, self.posicion_y = avanzar_en_circunferencia(
                 pivot_x, pivot_y, self.longitud_tramo,
-                self.posicion_x, self.posicion_y, d
+                self.posicion_x, self.posicion_y, distancia_arco
             )
         else:
             self.posicion_y += metros_avanzados * direccion
@@ -207,9 +210,6 @@ class Tramo:
 # Sin puerto configurado puede imprimir por consola para depuración
 class GPS:
 
-    # 1 grado de latitud ≈ 111 320 m
-    _METROS_POR_GRADO_LAT = 111_320.0
-
     def __init__(self,
                  torre: "Torre_Intermedia",
                  lat_origen: float,
@@ -231,12 +231,12 @@ class GPS:
     @property
     def latitud(self) -> float:
         """Latitud actual de la torre en grados decimales"""
-        return self.lat_origen + (self.torre.posicion_y / self._METROS_POR_GRADO_LAT)
+        return self.lat_origen + (self.torre.posicion_y / METROS_POR_GRADO_LAT)
 
     @property
     def longitud(self) -> float:
         """Longitud actual de la torre en grados decimales"""
-        metros_por_grado_lon = (self._METROS_POR_GRADO_LAT * math.cos(math.radians(self.lat_origen)))
+        metros_por_grado_lon = METROS_POR_GRADO_LAT * math.cos(math.radians(self.lat_origen))
         return self.lon_origen + (self.torre.posicion_x / metros_por_grado_lon)
 
     @property
@@ -331,11 +331,11 @@ class CajaInterfaz:
 
     @property
     def latitud(self) -> float:
-        return self.lat_origen + (self.torre.posicion_y / GPS._METROS_POR_GRADO_LAT)
+        return self.lat_origen + (self.torre.posicion_y / METROS_POR_GRADO_LAT)
 
     @property
     def longitud(self) -> float:
-        metros_por_grado_lon = GPS._METROS_POR_GRADO_LAT * math.cos(math.radians(self.lat_origen))
+        metros_por_grado_lon = METROS_POR_GRADO_LAT * math.cos(math.radians(self.lat_origen))
         return self.lon_origen + (self.torre.posicion_x / metros_por_grado_lon)
 
     @property
@@ -487,7 +487,7 @@ class Lineal:
         self._segundo_en_ciclo = 0
         self._en_marcha = False # el lineal comienza parado
 
-        self._mr_on_en_ciclo = 0 # segundos ON del motor rápido en el ciclo actual
+        self._segundos_motor_rapido_on = 0 # segundos ON del motor rápido en el ciclo actual
         self.motor_rapido_pct_on = 0.0 # % ON del motor rápido en el último ciclo completo
 
         # Dirección de marcha:  1 = avance (norte), -1 = marcha atrás (sur)
@@ -578,8 +578,8 @@ class Lineal:
 
             if self._segundo_en_ciclo == 0:
                 self.ciclo_actual += 1
-                self.motor_rapido_pct_on = self._mr_on_en_ciclo / self.DURACION_CICLO * 100.0
-                self._mr_on_en_ciclo = 0
+                self.motor_rapido_pct_on = self._segundos_motor_rapido_on / self.DURACION_CICLO * 100.0
+                self._segundos_motor_rapido_on = 0
 
             if not self._en_marcha:
                 continue # el tiempo pasa pero las torres no se mueven
@@ -625,25 +625,25 @@ class Lineal:
             # en la torre vecina ya actualizada → posición (x, y) físicamente correcta.
             y_cart = self.torres[0].posicion_y
             y_end = self.torres[-1].posicion_y
-            N = len(self.torres) - 1
-            k = self.indice_tramo_rigido
+            numero_intervalos = len(self.torres) - 1
+            indice_rigido = self.indice_tramo_rigido
 
-            # Lado izquierdo: torres 1..k, pivote = vecino izquierdo ya actualizado
-            for i in range(1, k + 1):
-                pivot = self.torres[i - 1]
-                y_target = y_cart + (y_end - y_cart) * i / N
-                self.torres[i].seguir(y_target, 1, self.direccion, pivot.posicion_x, pivot.posicion_y)
+            # Lado izquierdo: torres 1..indice_rigido, pivote = vecino izquierdo ya actualizado
+            for i in range(1, indice_rigido + 1):
+                torre_pivote = self.torres[i - 1]
+                y_objetivo   = y_cart + (y_end - y_cart) * i / numero_intervalos
+                self.torres[i].seguir(y_objetivo, 1, self.direccion, torre_pivote.posicion_x, torre_pivote.posicion_y)
 
-            # Lado derecho: torres N-1..k+1, pivote = vecino derecho ya actualizado
-            for i in range(N - 1, k, -1):
-                pivot    = self.torres[i + 1]
-                y_target = y_cart + (y_end - y_cart) * i / N
-                self.torres[i].seguir(y_target, 1, self.direccion, pivot.posicion_x, pivot.posicion_y)
+            # Lado derecho: torres (N-1)..indice_rigido+1, pivote = vecino derecho ya actualizado
+            for i in range(numero_intervalos - 1, indice_rigido, -1):
+                torre_pivote = self.torres[i + 1]
+                y_objetivo   = y_cart + (y_end - y_cart) * i / numero_intervalos
+                self.torres[i].seguir(y_objetivo, 1, self.direccion, torre_pivote.posicion_x, torre_pivote.posicion_y)
 
             self._actualizar_fss()
 
             if self.torres[self.indice_torre_motor_rapido].contactor.esta_cerrado:
-                self._mr_on_en_ciclo += 1
+                self._segundos_motor_rapido_on += 1
 
 
     # Propiedades de estado
@@ -669,18 +669,17 @@ class Lineal:
         promedia las posiciones que fijaron los dos lados y recoloca ambas torres del FSS de forma horizontal (dy=0),
         manteniendo la distancia = longitud_tramo
         """
-        k = self.indice_tramo_rigido
-        t_k = self.torres[k]
-        t_k1 = self.torres[k + 1]
-        L = self.longitud_tramo
+        indice_rigido      = self.indice_tramo_rigido
+        torre_izquierda_fss = self.torres[indice_rigido]
+        torre_derecha_fss   = self.torres[indice_rigido + 1]
 
-        x_mid = (t_k.posicion_x + t_k1.posicion_x) / 2.0
-        y_mid = (t_k.posicion_y + t_k1.posicion_y) / 2.0
+        x_centro = (torre_izquierda_fss.posicion_x + torre_derecha_fss.posicion_x) / 2.0
+        y_centro = (torre_izquierda_fss.posicion_y + torre_derecha_fss.posicion_y) / 2.0
 
-        t_k.posicion_x  = x_mid - L / 2.0
-        t_k1.posicion_x = x_mid + L / 2.0
-        t_k.posicion_y  = y_mid
-        t_k1.posicion_y = y_mid
+        torre_izquierda_fss.posicion_x = x_centro - self.longitud_tramo / 2.0
+        torre_derecha_fss.posicion_x   = x_centro + self.longitud_tramo / 2.0
+        torre_izquierda_fss.posicion_y = y_centro
+        torre_derecha_fss.posicion_y   = y_centro
 
     def _tiempo_formateado(self) -> str:
         """Devuelve el tiempo total transcurrido en formato Hh Mm Ss"""
