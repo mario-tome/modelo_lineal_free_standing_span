@@ -1,7 +1,7 @@
 import streamlit as st
 from modelo import Lineal
-from constantes import TERRENOS, get_defaults
-from trayectoria import get_origen_latlon, parse_trayectoria
+from logica.constantes import TERRENOS, get_defaults
+from logica.trayectoria import get_origen_latlon, parse_trayectoria
 
 try:
     import serial.tools.list_ports as _list_ports

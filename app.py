@@ -1,9 +1,9 @@
 import streamlit as st
-from constantes import get_defaults
-from estilos import CSS
-from teclado import manejar_teclado
-from sidebar import renderizar_sidebar
-from panel import panel_principal
+from logica.constantes import get_defaults
+from ui.estilos import CSS
+from ui.teclado import manejar_teclado
+from ui.sidebar import renderizar_sidebar
+from ui.panel import panel_principal
 
 st.set_page_config(
     page_title="Gemelo Digital Lineal",

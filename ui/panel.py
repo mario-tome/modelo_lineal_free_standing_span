@@ -2,9 +2,9 @@ import csv
 import io
 import streamlit as st
 from modelo import Lineal
-from constantes import TERRENOS
-from trayectoria import get_origen_latlon, parse_trayectoria, calcular_errores
-from figura import build_figure
+from logica.constantes import TERRENOS
+from logica.trayectoria import get_origen_latlon, parse_trayectoria, calcular_errores
+from ui.figura import build_figure
 
 
 @st.fragment(run_every=1)
