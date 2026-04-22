@@ -1,15 +1,11 @@
-"""
-streamlit run app.py
-"""
-import csv
-import io
-import math
-import os
+import csv, io, math,  os
 import pandas as pd
 import streamlit as st
 import streamlit.components.v1 as components
 import plotly.graph_objects as go
+
 from modelo import Lineal, Torre_Guia, Torre_Intermedia, GPS, CajaInterfaz
+
 try:
     import serial.tools.list_ports as _list_ports
     _SERIAL_DISPONIBLE = True
@@ -122,8 +118,7 @@ for k, v in defaults.items():
         st.session_state[k] = v
 
 
-# ─── Funciones auxiliares de trayectoria GPS ────────────────────────────────
-
+# Funciones auxiliares de trayectoria GPS
 _METROS_POR_GRADO_LAT = 111_320.0
 
 
@@ -212,9 +207,7 @@ def _calcular_errores(gps_x: float, gps_y: float, tray_pts: list, trail: list) -
     return ead_mm, erumbo
 
 
-# ────────────────────────────────────────────────────────────────────────────
-
-# Sidebar: se renderiza una sola vez, nunca parpadea
+# Sidebar
 with st.sidebar:
     st.markdown("## LINEAL")
     st.caption("Configura tu Gemelo Digital")
