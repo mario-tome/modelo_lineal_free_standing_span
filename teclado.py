@@ -6,42 +6,49 @@ import streamlit.components.v1 as components
 _DIRECTORIO_KBD = os.path.join(os.path.dirname(os.path.abspath(__file__)), "giro_kbd")
 os.makedirs(_DIRECTORIO_KBD, exist_ok=True)
 with open(os.path.join(_DIRECTORIO_KBD, "index.html"), "w", encoding="utf-8") as _f:
-    _f.write("""<!DOCTYPE html><html><head><script>
-var _init = false;
-var _st   = {left: false, right: false, reverse: false};
-function _send() {
-    window.parent.postMessage({
-        isStreamlitMessage: true,
-        type: 'streamlit:setComponentValue',
-        value: {left: _st.left, right: _st.right, reverse: _st.reverse},
-        dataType: 'json'
-    }, '*');
-}
-window.addEventListener('message', function(ev) {
-    if (!ev.data || ev.data.type !== 'streamlit:render') return;
-    if (!_init) {
-        _init = true;
-        window.parent.document.addEventListener('keydown', function(e) {
-            if (e.repeat) return;
-            var ch = false;
-            if (e.key === '<')              { _st.left    = true;          ch = true; }
-            if (e.key === '-')              { _st.right   = true;          ch = true; }
-            if (e.key.toLowerCase() === 'r'){ _st.reverse = !_st.reverse;  ch = true; }
-            if (ch) _send();
-        });
-        window.parent.document.addEventListener('keyup', function(e) {
-            var ch = false;
-            if (e.key === '<') { _st.left  = false; ch = true; }
-            if (e.key === '-') { _st.right = false; ch = true; }
-            if (ch) _send();
-        });
-    }
-    window.parent.postMessage(
-        {isStreamlitMessage: true, type: 'streamlit:setFrameHeight', height: 0}, '*');
-});
-window.parent.postMessage(
-    {isStreamlitMessage: true, type: 'streamlit:componentReady', apiVersion: 1}, '*');
-</script></head><body></body></html>""")
+    _f.write("""
+        <!DOCTYPE html><html><head><script>
+            var _init = false;
+            var _st   = {left: false, right: false, reverse: false};
+            
+            function _send() {
+                window.parent.postMessage({
+                    isStreamlitMessage: true,
+                    type: 'streamlit:setComponentValue',
+                    value: {left: _st.left, right: _st.right, reverse: _st.reverse},
+                    dataType: 'json'
+                }, '*');
+            }
+            
+            window.addEventListener('message', function(ev) {
+                if (!ev.data || ev.data.type !== 'streamlit:render') return;
+                
+                if (!_init) {
+                    _init = true;
+                    window.parent.document.addEventListener('keydown', function(e) {
+                        if (e.repeat) return;
+                        var ch = false;
+                        if (e.key === '<')              { _st.left    = true;          ch = true; }
+                        if (e.key === '-')              { _st.right   = true;          ch = true; }
+                        if (e.key.toLowerCase() === 'r'){ _st.reverse = !_st.reverse;  ch = true; }
+                        if (ch) _send();
+                    });
+                    
+                    window.parent.document.addEventListener('keyup', function(e) {
+                        var ch = false;
+                        if (e.key === '<') { _st.left  = false; ch = true; }
+                        if (e.key === '-') { _st.right = false; ch = true; }
+                        if (ch) _send();
+                    });
+                }
+             
+                window.parent.postMessage(
+                    {isStreamlitMessage: true, type: 'streamlit:setFrameHeight', height: 0}, '*');
+            });
+             
+            window.parent.postMessage(
+                {isStreamlitMessage: true, type: 'streamlit:componentReady', apiVersion: 1}, '*');
+        </script></head><body></body></html>""")
 
 _giro_kbd = components.declare_component("pivot_giro_kbd", path=_DIRECTORIO_KBD)
 
