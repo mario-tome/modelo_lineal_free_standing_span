@@ -75,11 +75,6 @@ class Torre:
         self.posicion_y += metros_avanzados * direccion
         return metros_avanzados
 
-    @property
-    def posicion(self) -> tuple:
-        return (self.posicion_x, self.posicion_y)
-
-
 # Torres de los extremos: Cart (izquierda) y End-tower (derecha)
 # Las únicas con contactor de duty cycle: su ciclo ON/OFF marca el ritmo de avance
 # En modo slow_down abandonan el duty cycle y copian el ON/OFF del motor rápido
@@ -254,28 +249,6 @@ class GPS:
         """Longitud en formato entero ×10⁷"""
         return round(self.longitud * 1e7)
 
-    def _abrir_puerto(self) -> bool:
-        """Intenta abrir el puerto serie, devuelve True si está listo"""
-        if self.puerto_serial is None:
-            return False
-        if not _SERIAL_DISPONIBLE:
-            print("Pyserial no instalado, ejecuta: pip install pyserial")
-            return False
-        try:
-            if self._conexion is None or not self._conexion.is_open:
-                self._conexion = _serial_module.Serial(
-                    self.puerto_serial, self.baudrate, timeout=1
-                )
-            return True
-        except Exception as e:
-            print(f"Error abriendo {self.puerto_serial}: {e}")
-            return False
-
-    def cerrar_puerto(self):
-        """Cierra el puerto serie si está abierto"""
-        if self._conexion and self._conexion.is_open:
-            self._conexion.close()
-
     def iniciar_transmision_background(self):
         """Lanza un hilo en segundo plano que transmite la posición 1 vez/segundo real por USB o consola"""
         if self.puerto_serial is None and not self.verbose_consola:
@@ -320,20 +293,6 @@ class GPS:
 
         if conexion is not None:
             conexion.close()
-
-    def transmitir(self):
-        """Envía la posición actual por USB (o consola si verbose)"""
-        mensaje = f"LAT:{self.lat_e7},LON:{self.lon_e7}\n"
-
-        if self._abrir_puerto():
-            try:
-                self._conexion.write(mensaje.encode("utf-8"))
-            except Exception as e:
-                print(f"[GPS] Error al transmitir: {e}")
-        elif self.verbose_consola:
-            print(f"[GPS] {mensaje.strip()}"
-                  f"  ({self.latitud:.7f}°, {self.longitud:.7f}°)")
-
 
 # Gestiona la comunicación bidireccional con la caja de interfaz Arduino (115 200 baud)
 # PC al Arduino (1 Hz) la posición GPS: "Lat 415191807 Lon -47151090 Carr 2"
@@ -611,7 +570,7 @@ class Lineal:
         self.guia_izquierda.contactor.duty_cycle = dc
         self.guia_derecha.contactor.duty_cycle   = dc
 
-    def avanza(self, segundos: int = 1, transmitir_gps: bool = True):
+    def avanza(self, segundos: int = 1):
         """Avanza la simulación el número de segundos indicado"""
         for _ in range(segundos):
             self.tiempo_total_segundos += 1
@@ -685,9 +644,6 @@ class Lineal:
 
             if self.torres[self.indice_torre_motor_rapido].contactor.esta_cerrado:
                 self._mr_on_en_ciclo += 1
-
-            if self.gps is not None and transmitir_gps:
-                self.gps.transmitir()
 
 
     # Propiedades de estado

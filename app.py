@@ -1003,7 +1003,7 @@ def panel_principal():
     # Avance de simulacion
     if state.running and not state.finished and lineal is not None:
         sim_spd_val = state.get("k_simspd", 60)
-        lineal.avanza(sim_spd_val, transmitir_gps=False)
+        lineal.avanza(sim_spd_val)
         # GPS: el hilo background (iniciado en INICIAR) transmite por su cuenta
 
         # Registro de trayectorias para el renderizado
