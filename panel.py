@@ -1,7 +1,7 @@
 import csv
 import io
 import streamlit as st
-from modelo import Lineal, Torre_Intermedia
+from modelo import Lineal
 from constantes import TERRENOS
 from trayectoria import get_origen_latlon, parse_trayectoria, calcular_errores
 from figura import build_figure
@@ -61,8 +61,8 @@ def panel_principal():
 
     # Avance de simulación
     if state.running and not state.finished and lineal is not None:
-        sim_spd_val = state.get("k_simspd", 60)
-        lineal.avanza(sim_spd_val)
+        segundos_simulacion = state.get("k_simspd", 60)
+        lineal.avanza(segundos_simulacion)
 
         if state.tower_trails is not None and len(state.tower_trails) == len(lineal.torres):
             for indice_torre, torre in enumerate(lineal.torres):
@@ -70,7 +70,7 @@ def panel_principal():
             if len(state.tower_trails[0]) > 2000:
                 state.tower_trails = [tr[-2000:] for tr in state.tower_trails]
 
-        state.vel_real = (lineal.posicion_norte - state.pos_prev) / (sim_spd_val / 60.0)
+        state.vel_real = (lineal.posicion_norte - state.pos_prev) / (segundos_simulacion / 60.0)
         state.pos_prev = lineal.posicion_norte
 
         # Construir fila CSV
@@ -81,40 +81,40 @@ def panel_principal():
             "slow_cart":      lineal.slow_down_cart,
             "slow_end_tower": lineal.slow_down_end_tower,
         }
-        longitud_nominal = lineal.longitud_tramo
+        longitud_tramo_nominal = lineal.longitud_tramo
         for j, torre in enumerate(lineal.torres):
             fila[f"torre_{j}_x"] = round(torre.posicion_x, 4)
             fila[f"torre_{j}_y"] = round(torre.posicion_y, 4)
             if j < lineal.numero_tramos:
-                tramo  = lineal.tramos[j]
-                dx     = tramo.torre_derecha.posicion_x - tramo.torre_izquierda.posicion_x
-                dy     = tramo.desviacion_norte
-                longitud_calculada = round((dx**2 + dy**2) ** 0.5, 4)
+                tramo   = lineal.tramos[j]
+                delta_x = tramo.torre_derecha.posicion_x - tramo.torre_izquierda.posicion_x
+                delta_y = tramo.desviacion_norte
+                longitud_calculada = round((delta_x**2 + delta_y**2) ** 0.5, 4)
                 fila[f"tramo_{j+1}_L_calculado"] = longitud_calculada
-                fila[f"tramo_{j+1}_deform_m"]    = round(longitud_nominal - longitud_calculada, 4)
-                fila[f"tramo_{j+1}_desv_y"]      = round(dy, 4)
+                fila[f"tramo_{j+1}_deform_m"]    = round(longitud_tramo_nominal - longitud_calculada, 4)
+                fila[f"tramo_{j+1}_desv_y"]      = round(delta_y, 4)
                 fila[f"tramo_{j+1}_rumbo_deg"]   = round(tramo.angulo_grados, 4)
         if lineal.gps:
             fila["lat_e7"] = lineal.gps.lat_e7
             fila["lon_e7"] = lineal.gps.lon_e7
 
         if state.get("k_tray_activa", False):
-            lat_c, lon_c = get_origen_latlon()
-            puntos_tray_c = parse_trayectoria(state.get("k_tray_input", ""), lat_c, lon_c)
-            torre_gps_c, indice_gps_c = None, -1
+            lat_origen, lon_origen = get_origen_latlon()
+            puntos_trayectoria     = parse_trayectoria(state.get("k_tray_input", ""), lat_origen, lon_origen)
+            torre_gps, indice_torre_gps = None, -1
             if lineal.gps:
-                torre_gps_c   = lineal.gps.torre
-                indice_gps_c  = lineal.torres.index(torre_gps_c)
+                torre_gps       = lineal.gps.torre
+                indice_torre_gps = lineal.torres.index(torre_gps)
             elif lineal.caja_interfaz:
-                torre_gps_c   = lineal.caja_interfaz.torre
-                indice_gps_c  = lineal.torres.index(torre_gps_c)
-            if torre_gps_c is not None and len(puntos_tray_c) >= 2:
-                trail_c = (state.tower_trails[indice_gps_c]
-                           if state.tower_trails and indice_gps_c < len(state.tower_trails) else [])
-                error_dist_c, error_rumbo_c = calcular_errores(
-                    torre_gps_c.posicion_x, torre_gps_c.posicion_y, puntos_tray_c, trail_c)
-                fila["EΔd_mm"]      = round(error_dist_c, 1) if error_dist_c is not None else None
-                fila["EΔrumbo_deg"] = round(error_rumbo_c, 2) if error_rumbo_c is not None else None
+                torre_gps       = lineal.caja_interfaz.torre
+                indice_torre_gps = lineal.torres.index(torre_gps)
+            if torre_gps is not None and len(puntos_trayectoria) >= 2:
+                historial_torre = (state.tower_trails[indice_torre_gps]
+                                   if state.tower_trails and indice_torre_gps < len(state.tower_trails) else [])
+                error_distancia, error_rumbo = calcular_errores(
+                    torre_gps.posicion_x, torre_gps.posicion_y, puntos_trayectoria, historial_torre)
+                fila["EΔd_mm"]      = round(error_distancia, 1) if error_distancia is not None else None
+                fila["EΔrumbo_deg"] = round(error_rumbo, 2)     if error_rumbo     is not None else None
             else:
                 fila["EΔd_mm"] = fila["EΔrumbo_deg"] = None
         state.historial.append(fila)
@@ -149,28 +149,28 @@ def panel_principal():
         state.tramos_ok_prev = tramos_ok
 
         # Auto-reverse o parada al llegar al límite del campo
-        ar_on   = state.get("k_auto_reverse", False)
-        ar_ymin = float(state.get("k_ar_ymin", 0))
-        ar_ymax = float(state.get("k_ar_ymax", longitud_campo))
+        auto_reverse = state.get("k_auto_reverse", False)
+        limite_sur   = float(state.get("k_ar_ymin", 0))
+        limite_norte = float(state.get("k_ar_ymax", longitud_campo))
 
-        if ar_on:
+        if auto_reverse:
             pos = lineal.posicion_norte
-            if not lineal.en_marcha_atras and pos >= ar_ymax:
+            if not lineal.en_marcha_atras and pos >= limite_norte:
                 lineal.invertir_direccion()
                 state.ar_pasadas += 1
                 state.log.append({
                     "t":    lineal._tiempo_formateado(),
                     "tipo": "INFO",
-                    "msg":  f"Auto-reverse ▼  ({pos:.1f} m ≥ {ar_ymax:.0f} m)  "
+                    "msg":  f"Auto-reverse ▼  ({pos:.1f} m ≥ {limite_norte:.0f} m)  "
                             f"— pasada #{state.ar_pasadas}",
                 })
-            elif lineal.en_marcha_atras and pos <= ar_ymin:
+            elif lineal.en_marcha_atras and pos <= limite_sur:
                 lineal.invertir_direccion()
                 state.ar_pasadas += 1
                 state.log.append({
                     "t":    lineal._tiempo_formateado(),
                     "tipo": "INFO",
-                    "msg":  f"Auto-reverse ▲  ({pos:.1f} m ≤ {ar_ymin:.0f} m)  "
+                    "msg":  f"Auto-reverse ▲  ({pos:.1f} m ≤ {limite_sur:.0f} m)  "
                             f"— pasada #{state.ar_pasadas}",
                 })
         else:
@@ -190,22 +190,22 @@ def panel_principal():
 
     # Errores de trayectoria: calculados en cada refresco (running o parado)
     if state.get("k_tray_activa", False) and lineal is not None:
-        lat_e, lon_e = get_origen_latlon()
-        puntos_tray_e = parse_trayectoria(state.get("k_tray_input", ""), lat_e, lon_e)
-        torre_gps_e, indice_gps_e = None, -1
+        lat_origen, lon_origen = get_origen_latlon()
+        puntos_trayectoria     = parse_trayectoria(state.get("k_tray_input", ""), lat_origen, lon_origen)
+        torre_gps, indice_torre_gps = None, -1
         if lineal.gps:
-            torre_gps_e  = lineal.gps.torre
-            indice_gps_e = lineal.torres.index(torre_gps_e)
+            torre_gps        = lineal.gps.torre
+            indice_torre_gps = lineal.torres.index(torre_gps)
         elif lineal.caja_interfaz:
-            torre_gps_e  = lineal.caja_interfaz.torre
-            indice_gps_e = lineal.torres.index(torre_gps_e)
-        if torre_gps_e is not None and len(puntos_tray_e) >= 2:
-            trail_e = (state.tower_trails[indice_gps_e]
-                       if state.tower_trails and indice_gps_e < len(state.tower_trails) else [])
-            error_dist_e, error_rumbo_e = calcular_errores(
-                torre_gps_e.posicion_x, torre_gps_e.posicion_y, puntos_tray_e, trail_e)
-            state.trayectoria_ead_mm     = error_dist_e
-            state.trayectoria_erumbo_deg = error_rumbo_e
+            torre_gps        = lineal.caja_interfaz.torre
+            indice_torre_gps = lineal.torres.index(torre_gps)
+        if torre_gps is not None and len(puntos_trayectoria) >= 2:
+            historial_torre = (state.tower_trails[indice_torre_gps]
+                               if state.tower_trails and indice_torre_gps < len(state.tower_trails) else [])
+            error_distancia, error_rumbo = calcular_errores(
+                torre_gps.posicion_x, torre_gps.posicion_y, puntos_trayectoria, historial_torre)
+            state.trayectoria_ead_mm     = error_distancia
+            state.trayectoria_erumbo_deg = error_rumbo
         else:
             state.trayectoria_ead_mm = state.trayectoria_erumbo_deg = None
     else:
@@ -231,25 +231,25 @@ def panel_principal():
             unsafe_allow_html=True,
         )
     elif state.running:
-        en_atras       = lineal is not None and lineal.en_marcha_atras
-        ar_activo      = state.get("k_auto_reverse", False)
-        badge_color    = "#ff7b72" if en_atras else "#3fb950"
-        badge_bg       = "rgba(255,123,114,0.08)" if en_atras else "rgba(63,185,80,0.08)"
-        badge_border   = "rgba(255,123,114,0.25)" if en_atras else "rgba(63,185,80,0.25)"
-        badge_etiqueta = "&#9660; MARCHA ATRÁS" if en_atras else "&#9650; EN MARCHA"
+        en_marcha_atras = lineal is not None and lineal.en_marcha_atras
+        auto_reverse    = state.get("k_auto_reverse", False)
+        color           = "#ff7b72" if en_marcha_atras else "#3fb950"
+        fondo           = "rgba(255,123,114,0.08)" if en_marcha_atras else "rgba(63,185,80,0.08)"
+        borde           = "rgba(255,123,114,0.25)" if en_marcha_atras else "rgba(63,185,80,0.25)"
+        texto_estado    = "&#9660; MARCHA ATRÁS" if en_marcha_atras else "&#9650; EN MARCHA"
         sufijo_ar = (
             f"&nbsp;<span style='color:#8b949e;font-weight:400;font-size:0.75rem;letter-spacing:1px'>"
             f"AUTO-REVERSE · {state.ar_pasadas} inv.</span>"
-            if ar_activo else ""
+            if auto_reverse else ""
         )
         st.markdown(
             f"<div style='display:inline-flex;align-items:center;gap:8px;"
-            f"background:{badge_bg};border:1px solid {badge_border};"
+            f"background:{fondo};border:1px solid {borde};"
             f"border-radius:20px;padding:5px 14px;margin:4px 0'>"
-            f"<span style='width:8px;height:8px;border-radius:50%;background:{badge_color};"
-            f"display:inline-block;box-shadow:0 0 6px {badge_color}'></span>"
-            f"<span style='color:{badge_color};font-weight:600;letter-spacing:2px;font-size:0.85rem'>"
-            f"{badge_etiqueta}</span>"
+            f"<span style='width:8px;height:8px;border-radius:50%;background:{color};"
+            f"display:inline-block;box-shadow:0 0 6px {color}'></span>"
+            f"<span style='color:{color};font-weight:600;letter-spacing:2px;font-size:0.85rem'>"
+            f"{texto_estado}</span>"
             f"{sufijo_ar}"
             f"</div>",
             unsafe_allow_html=True,
@@ -281,27 +281,27 @@ def panel_principal():
     # MÉTRICAS PRINCIPALES
     columnas_metricas = st.columns(10)
     if lineal:
-        porcentaje  = min(lineal.posicion_norte / longitud_campo * 100.0, 100.0)
-        vel_teorica = lineal.velocidad_nominal * lineal.velocidad_porcentaje / 100.0
-        vel_real    = state.get("vel_real", 0.0)
-        delta_vel   = vel_real - vel_teorica
+        porcentaje       = min(lineal.posicion_norte / longitud_campo * 100.0, 100.0)
+        velocidad_teorica = lineal.velocidad_nominal * lineal.velocidad_porcentaje / 100.0
+        velocidad_real    = state.get("vel_real", 0.0)
+        diferencia_velocidad = velocidad_real - velocidad_teorica
         columnas_metricas[0].metric("Tiempo campo",    lineal._tiempo_formateado())
         columnas_metricas[1].metric("Ciclo",           str(lineal.ciclo_actual))
         columnas_metricas[2].metric("Posición media",  f"{lineal.posicion_norte:.2f} m")
         columnas_metricas[3].metric("Recorrido",       f"{porcentaje:.1f} %")
         columnas_metricas[4].metric("Alineación",      "OK" if lineal.esta_alineado else "Corrigiendo")
-        slow_cart = lineal.slow_down_cart
-        slow_end  = lineal.slow_down_end_tower
-        valor_cart = ("★ ON" if lineal.guia_izquierda.contactor.esta_cerrado else "★ OFF") if slow_cart else \
-                     ("ON"   if lineal.guia_izquierda.contactor.esta_cerrado else "OFF")
-        valor_end  = ("★ ON" if lineal.guia_derecha.contactor.esta_cerrado   else "★ OFF") if slow_end else \
-                     ("ON"   if lineal.guia_derecha.contactor.esta_cerrado   else "OFF")
-        columnas_metricas[5].metric("Guia Izq (Cart)", valor_cart,
-                                    help="★ = en slow_down, sigue al motor rápido" if slow_cart else None)
-        columnas_metricas[6].metric("End-tower",       valor_end,
-                                    help="★ = en slow_down, sigue al motor rápido" if slow_end else None)
-        columnas_metricas[7].metric("Vel. real",       f"{vel_real:.2f} m/min",
-                                    delta=f"{delta_vel:+.2f} vs teórica",
+        cart_ralentizada = lineal.slow_down_cart
+        end_ralentizada  = lineal.slow_down_end_tower
+        estado_cart = ("★ ON" if lineal.guia_izquierda.contactor.esta_cerrado else "★ OFF") if cart_ralentizada else \
+                      ("ON"   if lineal.guia_izquierda.contactor.esta_cerrado else "OFF")
+        estado_end  = ("★ ON" if lineal.guia_derecha.contactor.esta_cerrado   else "★ OFF") if end_ralentizada else \
+                      ("ON"   if lineal.guia_derecha.contactor.esta_cerrado   else "OFF")
+        columnas_metricas[5].metric("Guia Izq (Cart)", estado_cart,
+                                    help="★ = en slow_down, sigue al motor rápido" if cart_ralentizada else None)
+        columnas_metricas[6].metric("End-tower",       estado_end,
+                                    help="★ = en slow_down, sigue al motor rápido" if end_ralentizada else None)
+        columnas_metricas[7].metric("Vel. real",       f"{velocidad_real:.2f} m/min",
+                                    delta=f"{diferencia_velocidad:+.2f} vs teórica",
                                     delta_color="normal")
         columnas_metricas[8].metric("Motor ★ activo",  f"{lineal.motor_rapido_pct_on:.0f} %",
                                     help="% del último ciclo completo (60 s sim.) con el motor rápido encendido")
@@ -314,18 +314,18 @@ def panel_principal():
 
     # BARRA DE PROGRESO
     if lineal:
-        ar_on_barra = state.get("k_auto_reverse", False)
-        ar_ymin_b   = float(state.get("k_ar_ymin", 0))
-        ar_ymax_b   = float(state.get("k_ar_ymax", longitud_campo))
+        auto_reverse = state.get("k_auto_reverse", False)
+        limite_sur   = float(state.get("k_ar_ymin", 0))
+        limite_norte = float(state.get("k_ar_ymax", longitud_campo))
 
-        if ar_on_barra:
-            rango_ar      = max(ar_ymax_b - ar_ymin_b, 1.0)
-            pos_clamped   = max(ar_ymin_b, min(ar_ymax_b, lineal.posicion_norte))
-            pct_barra     = (pos_clamped - ar_ymin_b) / rango_ar * 100.0
-            color_barra   = "#ff7b72" if lineal.en_marcha_atras else "#3fb950"
-            flecha_dir    = "▼" if lineal.en_marcha_atras else "▲"
-            texto_pasadas = f"{state.ar_pasadas} inversiones"
-            etiqueta_rango = f"{ar_ymin_b:.0f} m — {ar_ymax_b:.0f} m"
+        if auto_reverse:
+            amplitud_rango   = max(limite_norte - limite_sur, 1.0)
+            posicion_en_rango = max(limite_sur, min(limite_norte, lineal.posicion_norte))
+            porcentaje_barra  = (posicion_en_rango - limite_sur) / amplitud_rango * 100.0
+            color_barra       = "#ff7b72" if lineal.en_marcha_atras else "#3fb950"
+            simbolo_direccion = "▼" if lineal.en_marcha_atras else "▲"
+            texto_pasadas     = f"{state.ar_pasadas} inversiones"
+            etiqueta_rango    = f"{limite_sur:.0f} m — {limite_norte:.0f} m"
             st.markdown(
                 f"<div style='background:#161b22;border:1px solid #30363d;border-radius:10px;"
                 f"padding:14px 20px 10px 20px;margin:8px 0 16px 0'>"
@@ -336,16 +336,16 @@ def panel_principal():
                 f"Auto-reverse  ·  {etiqueta_rango}</span>"
                 f"<span style='color:{color_barra};font-size:1.5rem;font-weight:700;"
                 f"font-family:monospace;line-height:1'>"
-                f"{flecha_dir}&nbsp;{lineal.posicion_norte:.1f}"
+                f"{simbolo_direccion}&nbsp;{lineal.posicion_norte:.1f}"
                 f"<span style='color:#8b949e;font-size:0.9rem'> m</span></span>"
                 f"</div>"
                 f"<div style='position:relative;background:#21262d;border-radius:4px;"
                 f"height:8px;margin-bottom:8px'>"
                 f"<div style='position:absolute;left:0;top:0;"
                 f"background:rgba(63,185,80,0.12);border-radius:4px;"
-                f"width:{pct_barra:.2f}%;height:100%'></div>"
+                f"width:{porcentaje_barra:.2f}%;height:100%'></div>"
                 f"<div style='position:absolute;top:-3px;"
-                f"left:calc({pct_barra:.2f}% - 7px);width:14px;height:14px;"
+                f"left:calc({porcentaje_barra:.2f}% - 7px);width:14px;height:14px;"
                 f"border-radius:50%;background:{color_barra};"
                 f"box-shadow:0 0 6px {color_barra}'></div>"
                 f"</div>"
@@ -353,7 +353,7 @@ def panel_principal():
                 f"<span style='color:{color_barra};font-size:0.82rem;font-weight:600;"
                 f"font-family:monospace'>{texto_pasadas}</span>"
                 f"<span style='color:#484f58;font-size:0.82rem;font-family:monospace'>"
-                f"rango {rango_ar:.0f} m</span>"
+                f"rango {amplitud_rango:.0f} m</span>"
                 f"</div></div>",
                 unsafe_allow_html=True,
             )
@@ -385,32 +385,32 @@ def panel_principal():
 
     # MÉTRICAS GPS
     if lineal and lineal.gps:
-        gps     = lineal.gps
-        gps_idx = lineal.torres.index(gps.torre)
-        columnas_gps = st.columns(4)
-        ui_lat = gps.lat_e7 / 1e7
-        ui_lon = gps.lon_e7 / 1e7
-        prev_gps    = state.gps_prev
-        delta_lat = round(ui_lat - prev_gps["lat"], 7) if prev_gps else None
-        delta_lon = round(ui_lon - prev_gps["lon"], 7) if prev_gps else None
-        columnas_gps[0].metric("GPS · Torre",  f"Intermedia {gps_idx}")
-        columnas_gps[1].metric("Latitud",      f"{ui_lat:.7f}°",
-                               delta=f"{delta_lat:+.7f}°" if delta_lat is not None else None)
-        columnas_gps[2].metric("Longitud",     f"{ui_lon:.7f}°",
-                               delta=f"{delta_lon:+.7f}°" if delta_lon is not None else None)
+        gps              = lineal.gps
+        indice_torre_gps = lineal.torres.index(gps.torre)
+        columnas_gps     = st.columns(4)
+        latitud          = gps.lat_e7 / 1e7
+        longitud         = gps.lon_e7 / 1e7
+        gps_anterior     = state.gps_prev
+        cambio_latitud   = round(latitud  - gps_anterior["lat"], 7) if gps_anterior else None
+        cambio_longitud  = round(longitud - gps_anterior["lon"], 7) if gps_anterior else None
+        columnas_gps[0].metric("GPS · Torre",  f"Intermedia {indice_torre_gps}")
+        columnas_gps[1].metric("Latitud",      f"{latitud:.7f}°",
+                               delta=f"{cambio_latitud:+.7f}°" if cambio_latitud is not None else None)
+        columnas_gps[2].metric("Longitud",     f"{longitud:.7f}°",
+                               delta=f"{cambio_longitud:+.7f}°" if cambio_longitud is not None else None)
         columnas_gps[3].metric("Formato ×10⁷", f"{gps.lat_e7}  /  {gps.lon_e7}")
-        state.gps_prev = {"lat": ui_lat, "lon": ui_lon}
+        state.gps_prev = {"lat": latitud, "lon": longitud}
 
     # CAJA DE INTERFAZ
     if lineal and lineal.caja_interfaz:
-        caja     = lineal.caja_interfaz
-        caja_idx = lineal.torres.index(caja.torre)
-        color_safety = "#3fb950" if caja.safety_ok else "#f85149"
-        color_gps    = "#3fb950" if caja.gps_ok    else "#f85149"
-        color_cart   = "#ffa657" if caja.slow_down_cart      else "#484f58"
-        color_end    = "#ffa657" if caja.slow_down_end_tower else "#484f58"
-        columnas_caja = st.columns(6)
-        columnas_caja[0].metric("Caja · Torre GPS",    f"Intermedia {caja_idx}")
+        caja             = lineal.caja_interfaz
+        indice_torre_caja = lineal.torres.index(caja.torre)
+        color_safety     = "#3fb950" if caja.safety_ok else "#f85149"
+        color_gps        = "#3fb950" if caja.gps_ok    else "#f85149"
+        color_cart       = "#ffa657" if caja.slow_down_cart      else "#484f58"
+        color_end        = "#ffa657" if caja.slow_down_end_tower else "#484f58"
+        columnas_caja    = st.columns(6)
+        columnas_caja[0].metric("Caja · Torre GPS",    f"Intermedia {indice_torre_caja}")
         columnas_caja[1].metric("GPS enviado",
                                 f"{caja.lat_e7} / {caja.lon_e7}",
                                 help=f"{caja.latitud:.7f}°  {caja.longitud:.7f}°  Carr {caja.carr}")
@@ -510,18 +510,18 @@ def panel_principal():
             )
 
     posicion_norte = lineal.posicion_norte if lineal is not None else 0.0
-    trayectoria_figura = None
+    puntos_figura  = None
     if state.get("k_tray_activa", False) and lineal is not None:
         lat_fig, lon_fig = get_origen_latlon()
-        puntos_fig = parse_trayectoria(state.get("k_tray_input", ""), lat_fig, lon_fig)
-        trayectoria_figura = puntos_fig if len(puntos_fig) >= 2 else None
+        puntos_fig       = parse_trayectoria(state.get("k_tray_input", ""), lat_fig, lon_fig)
+        puntos_figura    = puntos_fig if len(puntos_fig) >= 2 else None
 
     st.plotly_chart(
         build_figure(
             lineal, longitud_campo, posicion_norte,
             st.session_state.get("k_vista_general", False),
             tower_trails=state.tower_trails,
-            trayectoria_xy=trayectoria_figura,
+            trayectoria_xy=puntos_figura,
         ),
         width="stretch",
         key="campo_pivot",

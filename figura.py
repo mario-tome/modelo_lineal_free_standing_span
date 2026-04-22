@@ -6,18 +6,18 @@ from modelo import Lineal, Torre_Guia, Torre_Intermedia
 def _color_tramo(tramo) -> str:
     if not tramo.esta_alineado:
         return "#f85149"
-    ang = abs(tramo.angulo_grados)
-    if ang < 0.5:
+    angulo = abs(tramo.angulo_grados)
+    if angulo < 0.5:
         return "#3fb950"
     return "#e3b341"
 
 
 def _estilo_torre(lineal: Lineal, i: int):
-    torre = lineal.torres[i]
-    n     = len(lineal.torres)
+    torre         = lineal.torres[i]
+    numero_torres = len(lineal.torres)
     if i == 0:
         return "#f78166", "square", "CART", 20
-    if i == n - 1:
+    if i == numero_torres - 1:
         return "#d2a8ff", "square", "END", 20
     if isinstance(torre, Torre_Intermedia) and torre.es_motor_rapido:
         return "#ffa657", "star", f"I{i}★", 18
@@ -177,12 +177,12 @@ def build_figure(lineal: Lineal | None, longitud_campo: float, pos_norte: float 
         y1 = tramo.torre_izquierda.posicion_y
         x2 = tramo.torre_derecha.posicion_x
         y2 = tramo.torre_derecha.posicion_y
-        ang   = tramo.angulo_grados
-        color = _color_tramo(tramo)
+        angulo = tramo.angulo_grados
+        color  = _color_tramo(tramo)
 
         hover = (
             f"<b>Tramo {idx + 1}{'  [RIGIDO]' if tramo.es_rigido else ''}</b><br>"
-            f"Angulo:    <b>{ang:+.3f} grd</b><br>"
+            f"Angulo:    <b>{angulo:+.3f} grd</b><br>"
             f"Desviacion: {tramo.desviacion_norte:+.3f} m<br>"
             f"Estado: {'OK' if tramo.esta_alineado else 'DESVIADO'}"
             f"<extra></extra>"
@@ -213,7 +213,7 @@ def build_figure(lineal: Lineal | None, longitud_campo: float, pos_norte: float 
             x=mx, y=my,
             text=(
                 f"<b>{encabezado}</b><br>"
-                f"{ang:+.2f}°<br>"
+                f"{angulo:+.2f}°<br>"
                 f"{tramo.desviacion_norte:+.3f} m"
             ),
             showarrow=False,
@@ -225,14 +225,14 @@ def build_figure(lineal: Lineal | None, longitud_campo: float, pos_norte: float 
             align="center",
         ))
 
-    n       = len(lineal.torres)
-    gps_idx = lineal.torres.index(lineal.gps.torre) if lineal.gps else -1
+    numero_torres = len(lineal.torres)
+    gps_idx       = lineal.torres.index(lineal.gps.torre) if lineal.gps else -1
     for i, torre in enumerate(lineal.torres):
         color, simbolo, etiqueta, tamanio = _estilo_torre(lineal, i)
 
         if i == 0:
             nombre = "Guia Izq (Cart)"
-        elif i == n - 1:
+        elif i == numero_torres - 1:
             nombre = "End-tower"
         elif isinstance(torre, Torre_Intermedia) and torre.es_motor_rapido:
             nombre = f"Intermedia {i}  [Motor Rapido — extremo der tramo rigido]"

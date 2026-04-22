@@ -1,6 +1,7 @@
 import streamlit as st
 from modelo import Lineal
 from constantes import TERRENOS, get_defaults
+from trayectoria import get_origen_latlon, parse_trayectoria
 
 try:
     import serial.tools.list_ports as _list_ports
@@ -12,15 +13,15 @@ SIN_PUERTO      = "— Sin puerto (solo consola) —"
 SIN_CAJA_PUERTO = "— Selecciona puerto —"
 
 
-def _iniciar_simulacion(tramos, t_len, vel_pct, v_nom, campo):
+def _iniciar_simulacion(numero_tramos, longitud_tramo, porcentaje_velocidad, velocidad_nominal, longitud_campo):
     state = st.session_state
     ruido_terreno = TERRENOS.get(state.get("k_terreno", "Normal"), 0.012)
     state.lineal = Lineal(
-        numero_tramos        = tramos,
-        longitud_tramo       = t_len,
-        velocidad_porcentaje = vel_pct,
-        velocidad_nominal    = v_nom,
-        ruido_lateral        = ruido_terreno,
+        numero_tramos = numero_tramos,
+        longitud_tramo = longitud_tramo,
+        velocidad_porcentaje = porcentaje_velocidad,
+        velocidad_nominal = velocidad_nominal,
+        ruido_lateral = ruido_terreno,
     )
     state.lineal.start()
     state.log.append({"t": "00h 00m 00s", "tipo": "START", "msg": "Sistema iniciado"})
@@ -30,10 +31,10 @@ def _iniciar_simulacion(tramos, t_len, vel_pct, v_nom, campo):
         puerto_raw = state.get("k_gps_puerto", SIN_PUERTO)
         puerto = None if (puerto_raw == SIN_PUERTO) else puerto_raw
         state.lineal.asignar_gps(
-            indice_torre    = state.get("k_gps_torre", 1),
-            lat_origen      = state.get("k_gps_lat_e7", 404168000) / 1e7,
-            lon_origen      = state.get("k_gps_lon_e7", -37038000) / 1e7,
-            puerto_serial   = puerto,
+            indice_torre = state.get("k_gps_torre", 1),
+            lat_origen = state.get("k_gps_lat_e7", 404168000) / 1e7,
+            lon_origen = state.get("k_gps_lon_e7", -37038000) / 1e7,
+            puerto_serial = puerto,
             verbose_consola = (puerto is None),
         )
         state.lineal.gps.iniciar_transmision_background()
@@ -42,20 +43,20 @@ def _iniciar_simulacion(tramos, t_len, vel_pct, v_nom, campo):
         puerto_caja = state.get("k_caja_puerto", "")
         if puerto_caja and puerto_caja != SIN_CAJA_PUERTO:
             state.lineal.asignar_caja(
-                indice_torre  = state.get("k_caja_torre", 1),
-                lat_origen    = state.get("k_caja_lat_e7", 404168000) / 1e7,
-                lon_origen    = state.get("k_caja_lon_e7", -37038000) / 1e7,
+                indice_torre = state.get("k_caja_torre", 1),
+                lat_origen = state.get("k_caja_lat_e7", 404168000) / 1e7,
+                lon_origen = state.get("k_caja_lon_e7", -37038000) / 1e7,
                 puerto_serial = puerto_caja,
-                carr          = state.get("k_caja_carr", 2),
+                carr = state.get("k_caja_carr", 2),
             )
             state.lineal.caja_interfaz.iniciar()
 
-    state.longitud_campo  = campo
-    state.running         = True
-    state.finished        = False
-    state.paused          = False
-    state.caja_slow_prev  = {"cart": False, "end": False, "safety": True}
-    state.tower_trails    = [[] for _ in range(len(state.lineal.torres))]
+    state.longitud_campo = longitud_campo
+    state.running = True
+    state.finished = False
+    state.paused = False
+    state.caja_slow_prev = {"cart": False, "end": False, "safety": True}
+    state.tower_trails = [[] for _ in range(len(state.lineal.torres))]
 
 
 def _limpiar_y_resetear():
@@ -85,39 +86,41 @@ def renderizar_sidebar():
                 "Simulacion activa — parametros bloqueados</span>",
                 unsafe_allow_html=True,
             )
+        
         c1, c2 = st.columns(2)
-        tramos = c1.number_input("N° de tramos",         3,   20,   5,   1,   disabled=locked, key="k_tramos")
-        t_len  = c2.number_input("Long. tramo (m)",      5,   500,  50,  5,   disabled=locked, key="k_tlen")
+        numero_tramos = c1.number_input("N° de tramos", 3, 20, 5, 1, disabled=locked, key="k_tramos")
+        longitud_tramo = c2.number_input("Long. tramo (m)", 5, 500, 50, 5, disabled=locked, key="k_tlen")
+        
         c3, c4 = st.columns(2)
-        v_nom  = c3.number_input("Vel. nominal (m/min)", 0.5, 10.0, 3.0, 0.5, disabled=locked, key="k_vnom")
-        campo  = c4.number_input("Campo total (m)",      100, 5000, 800, 50,  disabled=locked, key="k_campo")
+        velocidad_nominal = c3.number_input("Vel. nominal (m/min)", 0.5, 10.0, 3.0, 0.5, disabled=locked, key="k_vnom")
+        longitud_campo    = c4.number_input("Campo total (m)",      100, 5000, 800, 50,  disabled=locked, key="k_campo")
 
         st.markdown("##### Panel speed")
-        vel_pct = st.slider(
+        porcentaje_velocidad = st.slider(
             "Panel speed  (Duty cycle %)",
             1, 100, 50, key="k_vpct", format="%d %%",
             help="Porcentaje de la velocidad máxima a la que avanza el lineal.",
         )
-        v_media = vel_pct / 100 * v_nom
+        velocidad_media = porcentaje_velocidad / 100 * velocidad_nominal
         st.markdown(
             f"<div style='background:#161b22;border:1px solid #30363d;border-radius:8px;"
             f"padding:8px 12px;margin:2px 0 10px 0;display:flex;justify-content:space-between'>"
             f"<span><span style='color:#8b949e;font-size:0.7rem'>ON </span>"
-            f"<b style='color:#e6edf3;font-family:monospace'>{vel_pct * 60 / 100:.0f} s</b>"
+            f"<b style='color:#e6edf3;font-family:monospace'>{porcentaje_velocidad * 60 / 100:.0f} s</b>"
             f"<span style='color:#8b949e;font-size:0.7rem'> / 60 s</span></span>"
             f"<span><span style='color:#8b949e;font-size:0.7rem'>MEDIA </span>"
-            f"<b style='color:#3fb950;font-family:monospace'>{v_media:.2f} m/min</b></span>"
+            f"<b style='color:#3fb950;font-family:monospace'>{velocidad_media:.2f} m/min</b></span>"
             f"</div>",
             unsafe_allow_html=True,
         )
 
         st.markdown("##### Simulacion")
-        sim_spd = st.slider(
+        segundos_por_refresco = st.slider(
             "Factor de escala temporal de ejecución x veces real",
             1, 600, 60, key="k_simspd", format="x%d",
             help="Cuantos segundos de simulacion avanza el modelo entre cada refresco de pantalla.",
         )
-        st.caption(f"Cada refresco = **{sim_spd} s** avanza")
+        st.caption(f"Cada refresco = **{segundos_por_refresco} s** avanza")
 
         st.divider()
         st.markdown("##### Grados de patinaje por terreno")
@@ -129,40 +132,40 @@ def renderizar_sidebar():
             disabled=locked,
             help="Modela la deriva lateral natural de las torres guía según las irregularidades del terreno.",
         )
-        ruido_val = TERRENOS[terreno_sel]
-        if ruido_val > 0.0:
-            deriva_aprox = ruido_val * (3.0 / 60.0) * (state.get("k_vpct", 50) / 100.0) * (state.get("k_campo", 800) ** 0.5) * 60.0
+        ruido_terreno = TERRENOS[terreno_sel]
+        if ruido_terreno > 0.0:
+            deriva_aprox = ruido_terreno * (3.0 / 60.0) * (state.get("k_vpct", 50) / 100.0) * (state.get("k_campo", 800) ** 0.5) * 60.0
             st.caption(f"Deriva acumulada estimada al final del campo: **±{deriva_aprox:.0f} cm**")
 
         st.divider()
         st.markdown("##### Auto-reverse")
-        ar_on = st.toggle(
+        auto_reverse = st.toggle(
             "Activar auto-reverse",
             key="k_auto_reverse",
             help="El lineal rebota automáticamente entre los límites Y configurados. "
                  "La tecla S sigue funcionando para forzar un giro manual en cualquier momento.",
         )
-        if ar_on:
-            ar_ymin_def = 0
-            ar_ymax_def = int(state.get("k_campo", 800))
+        if auto_reverse:
+            limite_sur_defecto   = 0
+            limite_norte_defecto = int(state.get("k_campo", 800))
             c_ar1, c_ar2 = st.columns(2)
             c_ar1.number_input(
-                "Y mín (m)", min_value=0, max_value=ar_ymax_def,
-                value=state.get("k_ar_ymin", ar_ymin_def),
+                "Y mín (m)", min_value=0, max_value=limite_norte_defecto,
+                value=state.get("k_ar_ymin", limite_sur_defecto),
                 step=5, key="k_ar_ymin",
                 help="Posición norte mínima — al llegar aquí en marcha atrás se invierte a avance",
             )
             c_ar2.number_input(
-                "Y máx (m)", min_value=0, max_value=int(campo),
-                value=state.get("k_ar_ymax", ar_ymax_def),
+                "Y máx (m)", min_value=0, max_value=int(longitud_campo),
+                value=state.get("k_ar_ymax", limite_norte_defecto),
                 step=5, key="k_ar_ymax",
                 help="Posición norte máxima — al llegar aquí en avance se invierte a marcha atrás",
             )
-            ymin_display  = state.get("k_ar_ymin", ar_ymin_def)
-            ymax_display  = state.get("k_ar_ymax", ar_ymax_def)
-            pasadas       = state.get("ar_pasadas", 0)
+            limite_sur_display   = state.get("k_ar_ymin", limite_sur_defecto)
+            limite_norte_display = state.get("k_ar_ymax", limite_norte_defecto)
+            pasadas              = state.get("ar_pasadas", 0)
             st.caption(
-                f"Rebota entre **{ymin_display} m** y **{ymax_display} m**"
+                f"Rebota entre **{limite_sur_display} m** y **{limite_norte_display} m**"
                 + (f"  ·  **{pasadas}** inversiones" if state.running else "")
             )
 
@@ -180,30 +183,27 @@ def renderizar_sidebar():
             disabled=locked,
             label_visibility="collapsed",
         )
-        modo   = state.get("k_conexion_modo", "ninguno")
-        gps_on  = (modo == "gps")
-        caja_on = (modo == "caja")
+        modo_conexion = state.get("k_conexion_modo", "ninguno")
+        modo_gps  = (modo_conexion == "gps")
+        modo_caja = (modo_conexion == "caja")
 
         if _SERIAL_DISPONIBLE:
             puertos_serie = [p.device for p in _list_ports.comports()]
         else:
             puertos_serie = []
 
-        if gps_on:
+        if modo_gps:
             st.selectbox(
                 "Torre con el GPS",
-                options=list(range(1, tramos)),
+                options=list(range(1, numero_tramos)),
                 key="k_gps_torre",
                 disabled=locked,
                 format_func=lambda i: f"Intermedia {i}",
             )
             c_lat, c_lon = st.columns(2)
-            c_lat.number_input("Lat. origen (×10⁷)", value=404168000, step=1,
-                               key="k_gps_lat_e7", disabled=locked)
-            c_lon.number_input("Lon. origen (×10⁷)", value=-37038000, step=1,
-                               key="k_gps_lon_e7", disabled=locked)
-            st.markdown('<p style="font-size:0.875rem;margin:0 0 4px 0">Puerto serie</p>',
-                        unsafe_allow_html=True)
+            c_lat.number_input("Lat. origen (×10⁷)", value=404168000, step=1, key="k_gps_lat_e7", disabled=locked)
+            c_lon.number_input("Lon. origen (×10⁷)", value=-37038000, step=1, key="k_gps_lon_e7", disabled=locked)
+            st.markdown('<p style="font-size:0.875rem;margin:0 0 4px 0">Puerto serie</p>', unsafe_allow_html=True)
             c_puerto, c_refresh = st.columns([6, 1])
             with c_puerto:
                 st.selectbox("Puerto serie",
@@ -213,21 +213,18 @@ def renderizar_sidebar():
                 if st.button("↺", help="Actualizar puertos", disabled=locked, width="stretch"):
                     st.rerun()
 
-        if caja_on:
+        if modo_caja:
             st.selectbox(
-                "Torre GPS", options=list(range(1, tramos)),
+                "Torre GPS", options=list(range(1, numero_tramos)),
                 key="k_caja_torre", disabled=locked,
                 format_func=lambda i: f"Intermedia {i}",
                 help="Torre cuya posición se envía al Arduino como coordenada GPS.",
             )
             st.session_state["k_caja_carr"] = 2
             c_lat_c, c_lon_c = st.columns(2)
-            c_lat_c.number_input("Lat. origen (×10⁷)", value=404168000, step=1,
-                                  key="k_caja_lat_e7", disabled=locked)
-            c_lon_c.number_input("Lon. origen (×10⁷)", value=-37038000, step=1,
-                                  key="k_caja_lon_e7", disabled=locked)
-            st.markdown('<p style="font-size:0.875rem;margin:0 0 4px 0">Puerto serie Arduino</p>',
-                        unsafe_allow_html=True)
+            c_lat_c.number_input("Lat. origen (×10⁷)", value=404168000, step=1, key="k_caja_lat_e7", disabled=locked)
+            c_lon_c.number_input("Lon. origen (×10⁷)", value=-37038000, step=1, key="k_caja_lon_e7", disabled=locked)
+            st.markdown('<p style="font-size:0.875rem;margin:0 0 4px 0">Puerto serie Arduino</p>', unsafe_allow_html=True)
             c_pcaja, c_rcaja = st.columns([6, 1])
             with c_pcaja:
                 st.selectbox(
@@ -258,7 +255,6 @@ def renderizar_sidebar():
                 label_visibility="collapsed",
                 placeholder="415191807 -37038000\n415195000 -37030000\n415200000 -37020000",
             )
-            from trayectoria import get_origen_latlon, parse_trayectoria
             lat_sb, lon_sb = get_origen_latlon()
             puntos_sb = parse_trayectoria(state.get("k_tray_input", ""), lat_sb, lon_sb)
             if len(puntos_sb) >= 2:
@@ -272,7 +268,7 @@ def renderizar_sidebar():
 
         if state.lineal is None:
             if st.button("INICIAR", key="btn_iniciar", type="primary", width="stretch"):
-                _iniciar_simulacion(tramos, t_len, vel_pct, v_nom, campo)
+                _iniciar_simulacion(numero_tramos, longitud_tramo, porcentaje_velocidad, velocidad_nominal, longitud_campo)
                 st.rerun()
 
         elif state.running:
@@ -282,8 +278,7 @@ def renderizar_sidebar():
                     state.lineal.gps.detener_transmision_background()
                 if state.lineal.caja_interfaz:
                     state.lineal.caja_interfaz.detener()
-                state.log.append({"t": state.lineal._tiempo_formateado(), "tipo": "STOP",
-                                   "msg": f"Sistema pausado en {state.lineal.posicion_norte:.2f} m"})
+                state.log.append({"t": state.lineal._tiempo_formateado(), "tipo": "STOP", "msg": f"Sistema pausado en {state.lineal.posicion_norte:.2f} m"})
                 state.running   = False
                 state.paused    = True
                 st.rerun()
@@ -294,10 +289,9 @@ def renderizar_sidebar():
                 state.lineal.start()
                 if state.lineal.gps:
                     state.lineal.gps.iniciar_transmision_background()
-                state.log.append({"t": state.lineal._tiempo_formateado(), "tipo": "START",
-                                   "msg": f"Sistema reanudado desde {state.lineal.posicion_norte:.2f} m"})
+                state.log.append({"t": state.lineal._tiempo_formateado(), "tipo": "START", "msg": f"Sistema reanudado desde {state.lineal.posicion_norte:.2f} m"})
                 state.running = True
-                state.paused  = False
+                state.paused = False
                 st.rerun()
             if bc2.button("RESET", key="btn_reset", width="stretch"):
                 _limpiar_y_resetear()
@@ -313,7 +307,7 @@ def renderizar_sidebar():
         for tecla, descripcion in [
             ("< (mantener)", "Ralentiza Cart — sigue motor rápido, giro gradual izquierda"),
             ("- (mantener)", "Ralentiza End-tower — sigue motor rápido, giro gradual derecha"),
-            ("R (pulsar)",   "Marcha atrás / avance normal"),
+            ("R (pulsar)", "Marcha atrás / avance normal"),
         ]:
             st.markdown(
                 f"<code style='background:#161b22;border:1px solid #30363d;border-radius:4px;"

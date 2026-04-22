@@ -32,40 +32,45 @@ def parse_trayectoria(texto: str, lat_origen: float, lon_origen: float) -> list:
     return puntos
 
 
-def calcular_errores(gps_x: float, gps_y: float, puntos_trayectoria: list, trail: list) -> tuple:
+def calcular_errores(gps_x: float, gps_y: float, puntos_trayectoria: list, historial_posiciones: list) -> tuple:
     if len(puntos_trayectoria) < 2:
         return None, None
 
     distancia_minima = float("inf")
-    indice_segmento = 0
+    indice_segmento  = 0
     for i in range(len(puntos_trayectoria) - 1):
-        ax, ay = puntos_trayectoria[i]
-        bx, by = puntos_trayectoria[i + 1]
-        dx, dy = bx - ax, by - ay
-        longitud_segmento_cuadrado = dx * dx + dy * dy
+        x_inicio, y_inicio = puntos_trayectoria[i]
+        x_fin,    y_fin    = puntos_trayectoria[i + 1]
+        delta_x, delta_y   = x_fin - x_inicio, y_fin - y_inicio
+        longitud_segmento_cuadrado = delta_x * delta_x + delta_y * delta_y
         if longitud_segmento_cuadrado == 0:
-            distancia = math.hypot(gps_x - ax, gps_y - ay)
+            distancia = math.hypot(gps_x - x_inicio, gps_y - y_inicio)
         else:
-            t = max(0.0, min(1.0, ((gps_x - ax) * dx + (gps_y - ay) * dy) / longitud_segmento_cuadrado))
-            distancia = math.hypot(gps_x - (ax + t * dx), gps_y - (ay + t * dy))
+            proyeccion = max(0.0, min(1.0,
+                ((gps_x - x_inicio) * delta_x + (gps_y - y_inicio) * delta_y) / longitud_segmento_cuadrado))
+            distancia = math.hypot(
+                gps_x - (x_inicio + proyeccion * delta_x),
+                gps_y - (y_inicio + proyeccion * delta_y),
+            )
         if distancia < distancia_minima:
             distancia_minima = distancia
-            indice_segmento = i
+            indice_segmento  = i
 
     error_distancia_mm = distancia_minima * 1000.0
 
-    ax, ay = puntos_trayectoria[indice_segmento]
-    bx, by = puntos_trayectoria[indice_segmento + 1]
-    azimut_objetivo = math.degrees(math.atan2(bx - ax, by - ay))
+    x_inicio, y_inicio = puntos_trayectoria[indice_segmento]
+    x_fin,    y_fin    = puntos_trayectoria[indice_segmento + 1]
+    azimut_objetivo    = math.degrees(math.atan2(x_fin - x_inicio, y_fin - y_inicio))
 
     error_rumbo = None
-    if trail and len(trail) >= 2:
-        px, py = trail[-2]
-        cx, cy = trail[-1]
-        ddx, ddy = cx - px, cy - py
-        if ddx * ddx + ddy * ddy > 1e-10:
-            azimut_actual = math.degrees(math.atan2(ddx, ddy))
-            diferencia = azimut_actual - azimut_objetivo
+    if historial_posiciones and len(historial_posiciones) >= 2:
+        x_anterior, y_anterior = historial_posiciones[-2]
+        x_actual,   y_actual   = historial_posiciones[-1]
+        delta_x_movimiento     = x_actual - x_anterior
+        delta_y_movimiento     = y_actual - y_anterior
+        if delta_x_movimiento ** 2 + delta_y_movimiento ** 2 > 1e-10:
+            azimut_actual = math.degrees(math.atan2(delta_x_movimiento, delta_y_movimiento))
+            diferencia    = azimut_actual - azimut_objetivo
             while diferencia >  180: diferencia -= 360
             while diferencia < -180: diferencia += 360
             error_rumbo = diferencia

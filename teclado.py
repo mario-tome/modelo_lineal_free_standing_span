@@ -1,5 +1,4 @@
 import os
-import time
 import streamlit as st
 import streamlit.components.v1 as components
 
@@ -75,16 +74,16 @@ def manejar_teclado():
 
     # Ralentización por teclado: < → ralentiza Cart  /  - → ralentiza End-tower
     if st.session_state.lineal and st.session_state.running:
-        lineal       = st.session_state.lineal
-        slow_cart_kbd = bool(estado_teclado.get("left",  False))
-        slow_end_kbd  = bool(estado_teclado.get("right", False))
+        lineal = st.session_state.lineal
+        ralentizar_cart = bool(estado_teclado.get("left",  False))
+        ralentizar_end = bool(estado_teclado.get("right", False))
 
-        if slow_cart_kbd != lineal.slow_down_cart or slow_end_kbd != lineal.slow_down_end_tower:
-            lineal.slow_down_cart      = slow_cart_kbd
-            lineal.slow_down_end_tower = slow_end_kbd
-            if slow_cart_kbd:
+        if ralentizar_cart != lineal.slow_down_cart or ralentizar_end != lineal.slow_down_end_tower:
+            lineal.slow_down_cart      = ralentizar_cart
+            lineal.slow_down_end_tower = ralentizar_end
+            if ralentizar_cart:
                 mensaje = "Teclado < — Cart ralentizado, giro gradual hacia izquierda"
-            elif slow_end_kbd:
+            elif ralentizar_end:
                 mensaje = "Teclado - — End-tower ralentizado, giro gradual hacia derecha"
             else:
                 mensaje = "Teclado liberado — velocidad normal"
