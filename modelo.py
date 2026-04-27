@@ -65,16 +65,16 @@ class Torre:
         self.velocidad_nominal = velocidad_nominal
         self.porcentaje_patinaje = random.uniform(0.0, 5.0)  # única por torre
 
-    def avanzar(self, segundos: float, direccion: int = 1, heading: float = 0.0) -> float:
+    def avanzar(self, segundos: float, direccion: int = 1, rumbo: float = 0.0) -> float:
         """
         Mueve la torre durante "segundos" en la dirección del rumbo actual del lineal.
-        heading: ángulo en radianes desde el norte (positivo = este).
+        rumbo: ángulo en radianes desde el norte (positivo = este).
         Devuelve los metros recorridos (positivo siempre, el signo lo da direccion)
         """
         factor_patinaje  = 1.0 - (self.porcentaje_patinaje / 100.0) * random.uniform(0.5, 1.0)
         metros_avanzados = self.velocidad_nominal * (segundos / 60.0) * factor_patinaje
-        self.posicion_x += math.sin(heading) * metros_avanzados * direccion
-        self.posicion_y += math.cos(heading) * metros_avanzados * direccion
+        self.posicion_x += math.sin(rumbo) * metros_avanzados * direccion
+        self.posicion_y += math.cos(rumbo) * metros_avanzados * direccion
         return metros_avanzados
 
 # Torres de los extremos: Cart (izquierda) y End-tower (derecha)
@@ -92,17 +92,17 @@ class Torre_Guia(Torre):
         self.contactor = Contactor(velocidad_porcentaje)
         self.ruido_lateral = ruido_lateral
 
-    def avanzar(self, segundos: float, direccion: int = 1, heading: float = 0.0) -> float:
+    def avanzar(self, segundos: float, direccion: int = 1, rumbo: float = 0.0) -> float:
         """
         Avanza o retrocede si el contactor está cerrado, en la dirección del rumbo.
         El ruido lateral se aplica perpendicular al rumbo (cos/−sin).
         """
         if self.contactor.esta_cerrado:
-            metros = super().avanzar(segundos, direccion, heading)
+            metros = super().avanzar(segundos, direccion, rumbo)
             if self.ruido_lateral > 0.0 and metros > 0.0:
                 ruido = random.gauss(0.0, self.ruido_lateral * metros)
-                self.posicion_x += math.cos(heading) * ruido
-                self.posicion_y -= math.sin(heading) * ruido
+                self.posicion_x += math.cos(rumbo) * ruido
+                self.posicion_y -= math.sin(rumbo) * ruido
             return metros
         return 0.0
 
@@ -135,20 +135,20 @@ class Torre_Intermedia(Torre):
     def seguir(self, objetivo_x: float, objetivo_y: float, segundos: float,
                direccion: int = 1,
                pivot_x: float = None, pivot_y: float = None,
-               heading: float = 0.0) -> float:
+               rumbo: float = 0.0) -> float:
         """
         Sigue el objetivo 2D (objetivo_x, objetivo_y) en la diagonal Cart→End-tower.
-        El desfase se proyecta sobre la dirección de avance (heading) para que funcione
+        El desfase se proyecta sobre la dirección de avance (rumbo) para que funcione
         igual tanto si el lineal va recto al norte como en diagonal.
-        El signo del arco se calcula respecto al heading para que el giro sea correcto
-        en cualquier rumbo.
+        El signo del arco se calcula respecto al rumbo para que el giro sea correcto
+        en cualquier dirección.
         """
         # Proyección del vector (objetivo - posición) sobre el eje de avance del lineal
         dx = objetivo_x - self.posicion_x
         dy = objetivo_y - self.posicion_y
-        fwd_x = math.sin(heading)
-        fwd_y = math.cos(heading)
-        desviacion = (dx * fwd_x + dy * fwd_y) * direccion  # + atrasada, - adelantada
+        avance_x = math.sin(rumbo)
+        avance_y = math.cos(rumbo)
+        desviacion = (dx * avance_x + dy * avance_y) * direccion  # + atrasada, - adelantada
 
         if desviacion >= self.UMBRAL_ARRANQUE:
             self.contactor.cerrar()
@@ -162,11 +162,11 @@ class Torre_Intermedia(Torre):
         metros_avanzados = self.velocidad_nominal * self.factor_sobrevelocidad * (segundos / 60.0) * factor_patinaje
 
         if pivot_x is not None and pivot_y is not None:
-            # Lado derecho de la dirección de avance (perpendicular al heading, apuntando a la derecha)
-            # → la torre avanza en arco antihorario si está a la derecha del pivote, horario si está a la izquierda
-            right_x = math.cos(heading)
-            right_y = -math.sin(heading)
-            dot = (self.posicion_x - pivot_x) * right_x + (self.posicion_y - pivot_y) * right_y
+            # Derecha del rumbo (perpendicular apuntando a la derecha del avance)
+            # → antihorario si la torre está a la derecha del pivote, horario si está a la izquierda
+            derecha_x = math.cos(rumbo)
+            derecha_y = -math.sin(rumbo)
+            dot = (self.posicion_x - pivot_x) * derecha_x + (self.posicion_y - pivot_y) * derecha_y
             signo_avance   = 1 if dot > 0 else -1
             distancia_arco = metros_avanzados * direccion * signo_avance
             self.posicion_x, self.posicion_y = avanzar_en_circunferencia(
@@ -174,8 +174,8 @@ class Torre_Intermedia(Torre):
                 self.posicion_x, self.posicion_y, distancia_arco
             )
         else:
-            self.posicion_x += fwd_x * metros_avanzados * direccion
-            self.posicion_y += fwd_y * metros_avanzados * direccion
+            self.posicion_x += avance_x * metros_avanzados * direccion
+            self.posicion_y += avance_y * metros_avanzados * direccion
 
         return metros_avanzados
 
@@ -630,7 +630,7 @@ class Lineal:
                 continue # el tiempo pasa pero las torres no se mueven
 
             # Rumbo actual: las guías avanzarán en esta dirección
-            heading = self.rumbo
+            rumbo = self.rumbo
 
             # Leer estado de ralentización
             _slow_cart = self.slow_down_cart
@@ -651,8 +651,8 @@ class Lineal:
                     self.guia_izquierda.contactor.cerrar()
                 else:
                     self.guia_izquierda.contactor.abrir()
-                self.guia_izquierda.avanzar(1, self.direccion, heading)
-                self.guia_derecha.avanzar(1, self.direccion, heading)
+                self.guia_izquierda.avanzar(1, self.direccion, rumbo)
+                self.guia_derecha.avanzar(1, self.direccion, rumbo)
 
             elif _slow_end and not _slow_cart:
                 # SLOW_DOWN_END_TOWER: End-tower copia el ON/OFF del motor rápido
@@ -660,13 +660,13 @@ class Lineal:
                     self.guia_derecha.contactor.cerrar()
                 else:
                     self.guia_derecha.contactor.abrir()
-                self.guia_derecha.avanzar(1, self.direccion, heading)
-                self.guia_izquierda.avanzar(1, self.direccion, heading)
+                self.guia_derecha.avanzar(1, self.direccion, rumbo)
+                self.guia_izquierda.avanzar(1, self.direccion, rumbo)
 
             else:
                 # Sin slow_down activo: avance normal por duty cycle
-                self.guia_izquierda.avanzar(1, self.direccion, heading)
-                self.guia_derecha.avanzar(1, self.direccion, heading)
+                self.guia_izquierda.avanzar(1, self.direccion, rumbo)
+                self.guia_derecha.avanzar(1, self.direccion, rumbo)
 
             # Cada intermedia sigue su posición ideal en la diagonal Cart→End-tower
             # (interpolación lineal 2D) avanzando sobre un arco de circunferencia centrado
@@ -685,7 +685,7 @@ class Lineal:
                 y_objetivo   = y_cart + (y_end - y_cart) * i / numero_intervalos
                 self.torres[i].seguir(
                     x_objetivo, y_objetivo, 1, self.direccion,
-                    torre_pivote.posicion_x, torre_pivote.posicion_y, heading
+                    torre_pivote.posicion_x, torre_pivote.posicion_y, rumbo
                 )
 
             # Lado derecho: torres (N-1)..indice_rigido+1, pivote = vecino derecho ya actualizado
@@ -695,7 +695,7 @@ class Lineal:
                 y_objetivo   = y_cart + (y_end - y_cart) * i / numero_intervalos
                 self.torres[i].seguir(
                     x_objetivo, y_objetivo, 1, self.direccion,
-                    torre_pivote.posicion_x, torre_pivote.posicion_y, heading
+                    torre_pivote.posicion_x, torre_pivote.posicion_y, rumbo
                 )
 
             self._actualizar_fss()
