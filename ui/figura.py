@@ -6,7 +6,7 @@ from modelo import Lineal, Torre_Guia, Torre_Intermedia
 def _color_tramo(tramo) -> str:
     if not tramo.esta_alineado:
         return "#f85149"
-    angulo = abs(tramo.angulo_grados)
+    angulo = abs(tramo.angulo_relativo_grados)
     if angulo < 0.5:
         return "#3fb950"
     return "#e3b341"
@@ -177,13 +177,13 @@ def build_figure(lineal: Lineal | None, longitud_campo: float, pos_norte: float 
         y1 = tramo.torre_izquierda.posicion_y
         x2 = tramo.torre_derecha.posicion_x
         y2 = tramo.torre_derecha.posicion_y
-        angulo = tramo.angulo_grados
+        angulo = tramo.angulo_relativo_grados
         color  = _color_tramo(tramo)
 
         hover = (
             f"<b>Tramo {idx + 1}{'  [RIGIDO]' if tramo.es_rigido else ''}</b><br>"
-            f"Angulo:    <b>{angulo:+.3f} grd</b><br>"
-            f"Desviacion: {tramo.desviacion_norte:+.3f} m<br>"
+            f"Angulo rel: <b>{angulo:+.3f} grd</b><br>"
+            f"Desviacion rel: {tramo.desviacion_norte_relativa:+.3f} m<br>"
             f"Estado: {'OK' if tramo.esta_alineado else 'DESVIADO'}"
             f"<extra></extra>"
         )
@@ -214,7 +214,7 @@ def build_figure(lineal: Lineal | None, longitud_campo: float, pos_norte: float 
             text=(
                 f"<b>{encabezado}</b><br>"
                 f"{angulo:+.2f}°<br>"
-                f"{tramo.desviacion_norte:+.3f} m"
+                f"{tramo.desviacion_norte_relativa:+.3f} m"
             ),
             showarrow=False,
             font=dict(color=color, size=11, family="monospace"),
