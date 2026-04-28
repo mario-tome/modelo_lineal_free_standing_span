@@ -65,17 +65,16 @@ class Torre:
         self.velocidad_nominal = velocidad_nominal
         self.porcentaje_patinaje = random.uniform(0.0, 5.0)  # única por torre
 
-    def avanzar(self, segundos: float, direccion: int = 1) -> float:
+    def avanzar(self, segundos: float, direccion: int = 1, rumbo: float = 0.0) -> float:
         """
-        Mueve la torre durante "segundos" a velocidad nominal
-        direccion =  1: hacia el norte (avance normal)
-        direccion = -1: hacia el sur (marcha atrás)
-        El patinaje reduce ligeramente la velocidad según el terreno (0-5% aleatorio por torre)
+        Mueve la torre durante "segundos" en la dirección del rumbo actual del lineal.
+        rumbo: ángulo en radianes desde el norte (positivo = este).
         Devuelve los metros recorridos (positivo siempre, el signo lo da direccion)
         """
         factor_patinaje  = 1.0 - (self.porcentaje_patinaje / 100.0) * random.uniform(0.5, 1.0)
         metros_avanzados = self.velocidad_nominal * (segundos / 60.0) * factor_patinaje
-        self.posicion_y += metros_avanzados * direccion
+        self.posicion_x += math.sin(rumbo) * metros_avanzados * direccion
+        self.posicion_y += math.cos(rumbo) * metros_avanzados * direccion
         return metros_avanzados
 
 # Torres de los extremos: Cart (izquierda) y End-tower (derecha)
@@ -93,15 +92,17 @@ class Torre_Guia(Torre):
         self.contactor = Contactor(velocidad_porcentaje)
         self.ruido_lateral = ruido_lateral
 
-    def avanzar(self, segundos: float, direccion: int = 1) -> float:
+    def avanzar(self, segundos: float, direccion: int = 1, rumbo: float = 0.0) -> float:
         """
-        Avanza o retrocede si el contactor está cerrado
-        Aplica ruido lateral del terreno
+        Avanza o retrocede si el contactor está cerrado, en la dirección del rumbo.
+        El ruido lateral se aplica perpendicular al rumbo (cos/−sin).
         """
         if self.contactor.esta_cerrado:
-            metros = super().avanzar(segundos, direccion)
+            metros = super().avanzar(segundos, direccion, rumbo)
             if self.ruido_lateral > 0.0 and metros > 0.0:
-                self.posicion_x += random.gauss(0.0, self.ruido_lateral * metros)
+                ruido = random.gauss(0.0, self.ruido_lateral * metros)
+                self.posicion_x += math.cos(rumbo) * ruido
+                self.posicion_y -= math.sin(rumbo) * ruido
             return metros
         return 0.0
 
@@ -131,15 +132,23 @@ class Torre_Intermedia(Torre):
                 if self.es_motor_rapido
                 else self.FACTOR_SOBREVELOCIDAD)
 
-    def seguir(self, y_objetivo: float, segundos: float,
+    def seguir(self, objetivo_x: float, objetivo_y: float, segundos: float,
                direccion: int = 1,
-               pivot_x: float = None, pivot_y: float = None) -> float:
+               pivot_x: float = None, pivot_y: float = None,
+               rumbo: float = 0.0) -> float:
         """
-        Activa cuando está ≥10 cm por detrás del objetivo (y_objetivo)
-        Avanza a velocidad nominal completa y para cuando supera el objetivo en ≥10 cm
-        Si se pasan pivot_x/pivot_y, la torre avanza sobre el arco de circunferencia centrado en el pivote radio = longitud_tramo
+        Sigue el objetivo 2D (objetivo_x, objetivo_y) en la diagonal Cart→End-tower.
+        El desfase se proyecta sobre la dirección de avance (rumbo) para que funcione
+        igual tanto si el lineal va recto al norte como en diagonal.
+        El signo del arco se calcula respecto al rumbo para que el giro sea correcto
+        en cualquier dirección.
         """
-        desviacion = (y_objetivo - self.posicion_y) * direccion  # + atrasada, - adelantada
+        # Proyección del vector (objetivo - posición) sobre el eje de avance del lineal
+        dx = objetivo_x - self.posicion_x
+        dy = objetivo_y - self.posicion_y
+        avance_x = math.sin(rumbo)
+        avance_y = math.cos(rumbo)
+        desviacion = (dx * avance_x + dy * avance_y) * direccion  # + atrasada, - adelantada
 
         if desviacion >= self.UMBRAL_ARRANQUE:
             self.contactor.cerrar()
@@ -150,19 +159,23 @@ class Torre_Intermedia(Torre):
             return 0.0
 
         factor_patinaje  = 1.0 - (self.porcentaje_patinaje / 100.0) * random.uniform(0.5, 1.0)
-        metros_avanzados = (self.velocidad_nominal * self.factor_sobrevelocidad * (segundos / 60.0) * factor_patinaje)
+        metros_avanzados = self.velocidad_nominal * self.factor_sobrevelocidad * (segundos / 60.0) * factor_patinaje
 
         if pivot_x is not None and pivot_y is not None:
-            # Lado izquierdo: torre a la DERECHA del pivote = antihorario = norte = distancia positiva
-            # Lado derecho: torre a la IZQUIERDA del pivote = horario = norte = distancia negativa
-            signo_avance   = 1 if self.posicion_x > pivot_x else -1
+            # Derecha del rumbo (perpendicular apuntando a la derecha del avance)
+            # → antihorario si la torre está a la derecha del pivote, horario si está a la izquierda
+            derecha_x = math.cos(rumbo)
+            derecha_y = -math.sin(rumbo)
+            dot = (self.posicion_x - pivot_x) * derecha_x + (self.posicion_y - pivot_y) * derecha_y
+            signo_avance   = 1 if dot > 0 else -1
             distancia_arco = metros_avanzados * direccion * signo_avance
             self.posicion_x, self.posicion_y = avanzar_en_circunferencia(
                 pivot_x, pivot_y, self.longitud_tramo,
                 self.posicion_x, self.posicion_y, distancia_arco
             )
         else:
-            self.posicion_y += metros_avanzados * direccion
+            self.posicion_x += avance_x * metros_avanzados * direccion
+            self.posicion_y += avance_y * metros_avanzados * direccion
 
         return metros_avanzados
 
@@ -176,32 +189,49 @@ class Tramo:
 
     def __init__(self, torre_izquierda: Torre, torre_derecha: Torre,
                  es_rigido: bool = False):
-        
+
         self.torre_izquierda = torre_izquierda
         self.torre_derecha = torre_derecha
         self.es_rigido = es_rigido
+        # Ángulo esperado del tramo (grados desde horizontal E-W) según el rumbo global del lineal.
+        # Actualizado por Lineal._actualizar_fss() cada tick para que el display sea correcto
+        # incluso cuando el lineal avanza en diagonal.
+        self.angulo_referencia: float = 0.0
 
     @property
     def longitud_horizontal(self) -> float:
-        """Distancia fija en X entre las dos torres del tramo"""
+        """Distancia en X entre las dos torres del tramo"""
         return abs(self.torre_derecha.posicion_x - self.torre_izquierda.posicion_x)
 
     @property
     def desviacion_norte(self) -> float:
-        """Diferencia en Y entre torre derecha e izquierda (0 = alineado)"""
+        """Diferencia absoluta en Y entre torre derecha e izquierda"""
         return self.torre_derecha.posicion_y - self.torre_izquierda.posicion_y
 
     @property
+    def desviacion_norte_relativa(self) -> float:
+        """Desviación en Y del tramo respecto al ángulo esperado del lineal (0 = perfectamente alineado)"""
+        if self.longitud_horizontal == 0:
+            return self.desviacion_norte
+        dy_esperado = math.tan(math.radians(self.angulo_referencia)) * self.longitud_horizontal
+        return self.desviacion_norte - dy_esperado
+
+    @property
     def angulo_grados(self) -> float:
-        """Ángulo de inclinación del tramo respecto al eje horizontal"""
+        """Ángulo absoluto del tramo respecto al eje horizontal E-W"""
         if self.longitud_horizontal == 0:
             return 0.0
         return math.degrees(math.atan2(self.desviacion_norte, self.longitud_horizontal))
 
     @property
+    def angulo_relativo_grados(self) -> float:
+        """Ángulo del tramo relativo al ángulo de referencia del lineal (0 = alineado con el rumbo)"""
+        return self.angulo_grados - self.angulo_referencia
+
+    @property
     def esta_alineado(self) -> bool:
-        """True si la desviación está dentro de la tolerancia para considerarse alineado"""
-        return abs(self.desviacion_norte) < self.TOLERANCIA_ALINEACION
+        """True si la desviación relativa al rumbo del lineal está dentro de la tolerancia"""
+        return abs(self.desviacion_norte_relativa) < self.TOLERANCIA_ALINEACION
 
 
 # GPS virtual asignado a una Torre_Intermedia
@@ -570,6 +600,21 @@ class Lineal:
         self.guia_izquierda.contactor.duty_cycle = dc
         self.guia_derecha.contactor.duty_cycle   = dc
 
+    @property
+    def rumbo(self) -> float:
+        """
+        Rumbo actual del lineal en radianes desde el norte (positivo = este).
+        Se calcula como el ángulo perpendicular al eje Cart→End-tower: permite que las guías
+        avancen en la dirección correcta aunque el lineal no vaya recto al norte.
+        """
+        dx = self.guia_derecha.posicion_x - self.guia_izquierda.posicion_x
+        dy = self.guia_derecha.posicion_y - self.guia_izquierda.posicion_y
+        if abs(dx) < 1e-9 and abs(dy) < 1e-9:
+            return 0.0
+        # Perpendicular al vector Cart→End: (−dy, dx) normalizado
+        # Heading desde el norte = atan2(componente_este, componente_norte) = atan2(−dy, dx)
+        return math.atan2(-dy, dx)
+
     def avanza(self, segundos: int = 1):
         """Avanza la simulación el número de segundos indicado"""
         for _ in range(segundos):
@@ -583,6 +628,9 @@ class Lineal:
 
             if not self._en_marcha:
                 continue # el tiempo pasa pero las torres no se mueven
+
+            # Rumbo actual: las guías avanzarán en esta dirección
+            rumbo = self.rumbo
 
             # Leer estado de ralentización
             _slow_cart = self.slow_down_cart
@@ -603,8 +651,8 @@ class Lineal:
                     self.guia_izquierda.contactor.cerrar()
                 else:
                     self.guia_izquierda.contactor.abrir()
-                self.guia_izquierda.avanzar(1, self.direccion)
-                self.guia_derecha.avanzar(1, self.direccion)
+                self.guia_izquierda.avanzar(1, self.direccion, rumbo)
+                self.guia_derecha.avanzar(1, self.direccion, rumbo)
 
             elif _slow_end and not _slow_cart:
                 # SLOW_DOWN_END_TOWER: End-tower copia el ON/OFF del motor rápido
@@ -612,33 +660,43 @@ class Lineal:
                     self.guia_derecha.contactor.cerrar()
                 else:
                     self.guia_derecha.contactor.abrir()
-                self.guia_derecha.avanzar(1, self.direccion)
-                self.guia_izquierda.avanzar(1, self.direccion)
+                self.guia_derecha.avanzar(1, self.direccion, rumbo)
+                self.guia_izquierda.avanzar(1, self.direccion, rumbo)
 
             else:
                 # Sin slow_down activo: avance normal por duty cycle
-                self.guia_izquierda.avanzar(1, self.direccion)
-                self.guia_derecha.avanzar(1, self.direccion)
+                self.guia_izquierda.avanzar(1, self.direccion, rumbo)
+                self.guia_derecha.avanzar(1, self.direccion, rumbo)
 
             # Cada intermedia sigue su posición ideal en la diagonal Cart→End-tower
-            # (interpolación lineal) avanzando sobre un arco de circunferencia centrado
+            # (interpolación lineal 2D) avanzando sobre un arco de circunferencia centrado
             # en la torre vecina ya actualizada → posición (x, y) físicamente correcta.
+            x_cart = self.torres[0].posicion_x
             y_cart = self.torres[0].posicion_y
-            y_end = self.torres[-1].posicion_y
+            x_end  = self.torres[-1].posicion_x
+            y_end  = self.torres[-1].posicion_y
             numero_intervalos = len(self.torres) - 1
             indice_rigido = self.indice_tramo_rigido
 
             # Lado izquierdo: torres 1..indice_rigido, pivote = vecino izquierdo ya actualizado
             for i in range(1, indice_rigido + 1):
                 torre_pivote = self.torres[i - 1]
+                x_objetivo   = x_cart + (x_end - x_cart) * i / numero_intervalos
                 y_objetivo   = y_cart + (y_end - y_cart) * i / numero_intervalos
-                self.torres[i].seguir(y_objetivo, 1, self.direccion, torre_pivote.posicion_x, torre_pivote.posicion_y)
+                self.torres[i].seguir(
+                    x_objetivo, y_objetivo, 1, self.direccion,
+                    torre_pivote.posicion_x, torre_pivote.posicion_y, rumbo
+                )
 
             # Lado derecho: torres (N-1)..indice_rigido+1, pivote = vecino derecho ya actualizado
             for i in range(numero_intervalos - 1, indice_rigido, -1):
                 torre_pivote = self.torres[i + 1]
+                x_objetivo   = x_cart + (x_end - x_cart) * i / numero_intervalos
                 y_objetivo   = y_cart + (y_end - y_cart) * i / numero_intervalos
-                self.torres[i].seguir(y_objetivo, 1, self.direccion, torre_pivote.posicion_x, torre_pivote.posicion_y)
+                self.torres[i].seguir(
+                    x_objetivo, y_objetivo, 1, self.direccion,
+                    torre_pivote.posicion_x, torre_pivote.posicion_y, rumbo
+                )
 
             self._actualizar_fss()
 
@@ -666,20 +724,38 @@ class Lineal:
     def _actualizar_fss(self):
         """
         Corrige el tramo rígido central (FSS):
-        promedia las posiciones que fijaron los dos lados y recoloca ambas torres del FSS de forma horizontal (dy=0),
-        manteniendo la distancia = longitud_tramo
+        promedia las posiciones que fijaron los dos lados y recoloca ambas torres del FSS
+        paralelas al eje Cart→End-tower (no necesariamente horizontal), manteniendo longitud_tramo.
+        También actualiza angulo_referencia de todos los tramos para que el display sea correcto
+        cuando el lineal avanza en diagonal.
         """
-        indice_rigido      = self.indice_tramo_rigido
+        indice_rigido       = self.indice_tramo_rigido
         torre_izquierda_fss = self.torres[indice_rigido]
         torre_derecha_fss   = self.torres[indice_rigido + 1]
 
         x_centro = (torre_izquierda_fss.posicion_x + torre_derecha_fss.posicion_x) / 2.0
         y_centro = (torre_izquierda_fss.posicion_y + torre_derecha_fss.posicion_y) / 2.0
 
-        torre_izquierda_fss.posicion_x = x_centro - self.longitud_tramo / 2.0
-        torre_derecha_fss.posicion_x   = x_centro + self.longitud_tramo / 2.0
-        torre_izquierda_fss.posicion_y = y_centro
-        torre_derecha_fss.posicion_y   = y_centro
+        # Vector unitario a lo largo del lineal completo (Cart → End-tower)
+        dx = self.guia_derecha.posicion_x - self.guia_izquierda.posicion_x
+        dy = self.guia_derecha.posicion_y - self.guia_izquierda.posicion_y
+        long_total = math.sqrt(dx * dx + dy * dy)
+        if long_total < 1e-9:
+            ux, uy = 1.0, 0.0
+        else:
+            ux = dx / long_total
+            uy = dy / long_total
+
+        media = self.longitud_tramo / 2.0
+        torre_izquierda_fss.posicion_x = x_centro - ux * media
+        torre_izquierda_fss.posicion_y = y_centro - uy * media
+        torre_derecha_fss.posicion_x   = x_centro + ux * media
+        torre_derecha_fss.posicion_y   = y_centro + uy * media
+
+        # Actualiza ángulo de referencia de todos los tramos para el display relativo
+        angulo_ref = math.degrees(math.atan2(dy, dx))
+        for tramo in self.tramos:
+            tramo.angulo_referencia = angulo_ref
 
     def _tiempo_formateado(self) -> str:
         """Devuelve el tiempo total transcurrido en formato Hh Mm Ss"""
