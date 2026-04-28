@@ -29,15 +29,15 @@ direction TB
 	    +longitud_tramo: float
 	    +velocidad_nominal: float
 	    +porcentaje_patinaje: float
-	    +__init__(posicion_x, posicion_y, longitud_tramo, velocidad_nominal)
-	    +avanzar(segundos: float, direccion: int) float
+	    +__init__(posicion_x, posicion_y, longitud_tramo, velocidad_nominal: float = 3.0)
+	    +avanzar(segundos: float, direccion: int = 1, rumbo: float = 0.0) float
     }
 
     class Torre_Guia {
 	    +contactor: Contactor
 	    +ruido_lateral: float
-	    +__init__(..., velocidad_porcentaje: float = 50.0, ruido_lateral: float = 0.0)
-	    +avanzar(segundos: float, direccion: int) float
+	    +__init__(posicion_x, posicion_y, longitud_tramo, velocidad_nominal: float = 3.0, velocidad_porcentaje: float = 50.0, ruido_lateral: float = 0.0)
+	    +avanzar(segundos: float, direccion: int = 1, rumbo: float = 0.0) float
     }
 
     class Torre_Intermedia {
@@ -48,8 +48,8 @@ direction TB
 	    +contactor: Contactor
 	    +es_motor_rapido: bool
 	    +factor_sobrevelocidad: float «prop»
-	    +__init__(..., es_motor_rapido: bool = False)
-	    +seguir(y_objetivo: float, segundos: float, direccion: int, pivot_x: float, pivot_y: float) float
+	    +__init__(posicion_x, posicion_y, longitud_tramo, velocidad_nominal: float = 3.0, es_motor_rapido: bool = False)
+	    +seguir(objetivo_x: float, objetivo_y: float, segundos: float, direccion: int = 1, pivot_x: float = None, pivot_y: float = None, rumbo: float = 0.0) float
     }
 
     class Tramo {
@@ -57,9 +57,12 @@ direction TB
 	    +torre_izquierda: Torre
 	    +torre_derecha: Torre
 	    +es_rigido: bool
+	    +angulo_referencia: float
 	    +longitud_horizontal: float «prop»
 	    +desviacion_norte: float «prop»
+	    +desviacion_norte_relativa: float «prop»
 	    +angulo_grados: float «prop»
+	    +angulo_relativo_grados: float «prop»
 	    +esta_alineado: bool «prop»
 	    +__init__(torre_izquierda, torre_derecha, es_rigido: bool = False)
     }
@@ -115,8 +118,8 @@ direction TB
 	    +velocidad_nominal: float
 	    +indice_tramo_rigido: int
 	    +indice_torre_motor_rapido: int
-	    +torres: list[Torre]
-	    +tramos: list[Tramo]
+	    +torres: list~Torre~
+	    +tramos: list~Tramo~
 	    +guia_izquierda: Torre_Guia
 	    +guia_derecha: Torre_Guia
 	    +tiempo_total_segundos: int
@@ -134,14 +137,15 @@ direction TB
 	    +longitud_total: float «prop»
 	    +esta_alineado: bool «prop»
 	    +en_marcha_atras: bool «prop»
-	    +__init__(numero_tramos, longitud_tramo, velocidad_porcentaje, velocidad_nominal, ruido_lateral)
+	    +rumbo: float «prop»
+	    +__init__(numero_tramos: int = 5, longitud_tramo: float = 50.0, velocidad_porcentaje: float = 50.0, velocidad_nominal: float = 3.0, ruido_lateral: float = 0.0)
 	    +asignar_gps(indice_torre, lat_origen, lon_origen, puerto_serial, baudrate, verbose_consola)
 	    +asignar_caja(indice_torre, lat_origen, lon_origen, puerto_serial, carr)
 	    +start()
 	    +stop()
 	    +invertir_direccion()
 	    +set_speed(velocidad_porcentaje: float)
-	    +avanza(segundos: int)
+	    +avanza(segundos: int = 1)
 	    -_actualizar_fss()
 	    -_tiempo_formateado() str
     }
