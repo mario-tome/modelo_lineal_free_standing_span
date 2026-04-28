@@ -3,6 +3,18 @@ import plotly.graph_objects as go
 from modelo import Lineal, Torre_Guia, Torre_Intermedia
 
 
+def _nombre_torre_corto(lineal: Lineal, indice: int) -> str:
+    """Nombre corto de una torre para las etiquetas de comparación en tramos"""
+    if indice == 0:
+        return "CART"
+    if indice == len(lineal.torres) - 1:
+        return "END"
+    torre = lineal.torres[indice]
+    if isinstance(torre, Torre_Intermedia) and torre.es_motor_rapido:
+        return f"I{indice}★"
+    return f"I{indice}"
+
+
 def _color_tramo(tramo) -> str:
     if not tramo.esta_alineado:
         return "#f85149"
@@ -180,13 +192,25 @@ def build_figure(lineal: Lineal | None, longitud_campo: float, pos_norte: float 
         angulo = tramo.angulo_relativo_grados
         color  = _color_tramo(tramo)
 
-        hover = (
-            f"<b>Tramo {idx + 1}{'  [RIGIDO]' if tramo.es_rigido else ''}</b><br>"
-            f"Angulo rel: <b>{angulo:+.3f} grd</b><br>"
-            f"Desviacion rel: {tramo.desviacion_norte_relativa:+.3f} m<br>"
-            f"Estado: {'OK' if tramo.esta_alineado else 'DESVIADO'}"
-            f"<extra></extra>"
-        )
+        nombre_izq = _nombre_torre_corto(lineal, idx)
+        nombre_der = _nombre_torre_corto(lineal, idx + 1)
+
+        if tramo.es_rigido:
+            hover = (
+                f"<b>Tramo {idx + 1}  [RIGIDO]</b><br>"
+                f"{nombre_izq} ══ {nombre_der}<br>"
+                f"Bloque rígido — ambas torres se mueven como una unidad<br>"
+                f"No aplica medición de desviación relativa"
+                f"<extra></extra>"
+            )
+        else:
+            hover = (
+                f"<b>Tramo {idx + 1}</b>  {nombre_izq} → {nombre_der}<br>"
+                f"Angulo rel: <b>{angulo:+.3f} grd</b><br>"
+                f"Desviacion rel: {tramo.desviacion_norte_relativa:+.3f} m<br>"
+                f"Estado: {'OK' if tramo.esta_alineado else 'DESVIADO'}"
+                f"<extra></extra>"
+            )
 
         if tramo.es_rigido:
             trazos.append(go.Scatter(x=[x1, x2], y=[y1, y2], mode="lines",
@@ -208,14 +232,20 @@ def build_figure(lineal: Lineal | None, longitud_campo: float, pos_norte: float 
 
         mx, my = (x1 + x2) / 2, (y1 + y2) / 2
         borde_anotacion = "#ffa657" if tramo.es_rigido else color
-        encabezado = f"T{idx + 1}  FSS" if tramo.es_rigido else f"T{idx + 1}"
+
+        if tramo.es_rigido:
+            # El FSS es un bloque rígido: solo se muestra la etiqueta, sin datos de desviación
+            texto_anotacion = f"<b>T{idx + 1}  FSS</b>"
+        else:
+            # Muestra qué torres se están comparando y los valores de desviación
+            texto_anotacion = (
+                f"<b>T{idx + 1}</b>  {nombre_izq}→{nombre_der}<br>"
+                f"{angulo:+.2f}°  /  {tramo.desviacion_norte_relativa:+.3f} m"
+            )
+
         anotaciones.append(dict(
             x=mx, y=my,
-            text=(
-                f"<b>{encabezado}</b><br>"
-                f"{angulo:+.2f}°<br>"
-                f"{tramo.desviacion_norte_relativa:+.3f} m"
-            ),
+            text=texto_anotacion,
             showarrow=False,
             font=dict(color=color, size=11, family="monospace"),
             bgcolor="rgba(13,17,23,0.82)",
