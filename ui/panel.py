@@ -434,10 +434,51 @@ def panel_principal():
             unsafe_allow_html=True,
         )
 
-    # FILA COMPACTA: CSV · LOG · GPS TRACK
-    if lineal:
-        col_csv, col_log, col_gps_track = st.columns([1, 2, 4])
+    # FIGURA: vista general · CSV · Log · GPS track  [· Δd · Δrumbo si trayectoria activa]
+    _tray_on = state.get("k_tray_activa", False)
+    if _tray_on:
+        col_toggle, col_ead, col_erm, col_csv, col_log, col_gps_track = st.columns([1, 1, 1, 1, 2, 3])
+    else:
+        col_toggle, col_csv, col_log, col_gps_track = st.columns([1, 1, 2, 4])
+        col_ead = col_erm = None
 
+    with col_toggle:
+        st.toggle(
+            "Vista general",
+            key="k_vista_general",
+            help="OFF → escala 1:1 siguiendo al lineal  ·  ON → campo completo",
+        )
+
+    if _tray_on and col_ead is not None:
+        valor_ead = state.get("trayectoria_ead_mm")
+        valor_erm = state.get("trayectoria_erumbo_deg")
+        _ead_str = f"{valor_ead:.0f} mm" if valor_ead is not None else "—"
+        _erm_str = f"{valor_erm:+.1f}°"  if valor_erm is not None else "—"
+        with col_ead:
+            st.markdown(
+                f"<div style='background:#161b22;border:1px solid #30363d;border-radius:6px;"
+                f"padding:0 12px;display:flex;align-items:center;gap:8px;height:38px;"
+                f"white-space:nowrap' title='Desviación perpendicular de la torre GPS "
+                f"respecto al segmento de trayectoria más cercano'>"
+                f"<span style='font-size:0.85rem;color:#8b949e;font-family:monospace'>Δd</span>"
+                f"<span style='font-size:0.85rem;font-weight:700;color:#e6edf3'>{_ead_str}</span>"
+                f"</div>",
+                unsafe_allow_html=True,
+            )
+        with col_erm:
+            st.markdown(
+                f"<div style='background:#161b22;border:1px solid #30363d;border-radius:6px;"
+                f"padding:0 12px;display:flex;align-items:center;gap:8px;height:38px;"
+                f"white-space:nowrap' title='Diferencia entre el azimut de movimiento real "
+                f"de la torre GPS y el azimut del segmento objetivo "
+                f"(0° = norte, + = desviado a la derecha, − = a la izquierda)'>"
+                f"<span style='font-size:0.85rem;color:#8b949e;font-family:monospace'>Δrumbo</span>"
+                f"<span style='font-size:0.85rem;font-weight:700;color:#e6edf3'>{_erm_str}</span>"
+                f"</div>",
+                unsafe_allow_html=True,
+            )
+
+    if lineal:
         with col_csv:
             if state.historial:
                 buf = io.StringIO()
@@ -481,33 +522,6 @@ def panel_principal():
                         hide_index=True,
                         width="stretch",
                     )
-
-    # FIGURA
-    col_toggle, col_ead, col_erm, _ = st.columns([1, 1, 1, 3])
-    with col_toggle:
-        st.toggle(
-            "Vista general",
-            key="k_vista_general",
-            help="OFF → escala 1:1 siguiendo al lineal  ·  ON → campo completo",
-        )
-    if state.get("k_tray_activa", False):
-        valor_ead = state.get("trayectoria_ead_mm")
-        valor_erm = state.get("trayectoria_erumbo_deg")
-        with col_ead:
-            st.metric(
-                "EΔd",
-                f"{valor_ead:.0f} mm" if valor_ead is not None else "—",
-                help="Error Δ distancia: desviación perpendicular de la torre GPS "
-                     "respecto al segmento de trayectoria más cercano",
-            )
-        with col_erm:
-            st.metric(
-                "EΔrumbo",
-                f"{valor_erm:+.1f}°" if valor_erm is not None else "—",
-                help="Error Δ rumbo: diferencia entre el azimut de movimiento real "
-                     "de la torre GPS y el azimut del segmento objetivo "
-                     "(0° = norte, + = desviado a la derecha, − = a la izquierda)",
-            )
 
     posicion_norte = lineal.posicion_norte if lineal is not None else 0.0
     puntos_figura  = None

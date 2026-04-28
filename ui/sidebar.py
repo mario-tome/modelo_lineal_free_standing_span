@@ -337,7 +337,7 @@ def renderizar_sidebar():
                 st.rerun()
 
         elif state.running:
-            if st.button("STOP / PAUSAR", key="btn_stop", width="stretch"):
+            if st.button("STOP", key="btn_stop", width="stretch"):
                 state.lineal.stop()
                 if state.lineal.gps:
                     state.lineal.gps.detener_transmision_background()
@@ -350,7 +350,7 @@ def renderizar_sidebar():
 
         elif state.paused and not state.finished:
             bc1, bc2 = st.columns(2)
-            if bc1.button("START / CONTINUAR", key="btn_start", type="primary", width="stretch"):
+            if bc1.button("START", key="btn_start", type="primary", width="stretch"):
                 state.lineal.start()
                 if state.lineal.gps:
                     state.lineal.gps.iniciar_transmision_background()
