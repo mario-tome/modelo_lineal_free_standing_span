@@ -1,3 +1,4 @@
+import math
 import streamlit as st
 from modelo import Lineal
 from logica.constantes import TERRENOS, get_defaults
@@ -214,16 +215,28 @@ def renderizar_sidebar():
                     st.rerun()
 
         if modo_caja:
-            st.selectbox(
-                "Torre GPS", options=list(range(1, numero_tramos)),
-                key="k_caja_torre", disabled=locked,
-                format_func=lambda i: f"Intermedia {i}",
-                help="Torre cuya posición se envía al Arduino como coordenada GPS.",
-            )
             st.session_state["k_caja_carr"] = 2
             c_lat_c, c_lon_c = st.columns(2)
             c_lat_c.number_input("Lat. origen (×10⁷)", value=404168000, step=1, key="k_caja_lat_e7", disabled=locked)
             c_lon_c.number_input("Lon. origen (×10⁷)", value=-37038000, step=1, key="k_caja_lon_e7", disabled=locked)
+
+            # Coordenadas iniciales de cada torre: posicion_y=0 en el origen,
+            # posicion_x = longitud_tramo * i → solo cambia la longitud
+            _lat_e7_orig = state.get("k_caja_lat_e7", 404168000)
+            _lon_e7_orig = state.get("k_caja_lon_e7", -37038000)
+            _ltram       = state.get("k_tlen", 50)
+            _mpg_lon     = 111320.0 * math.cos(math.radians(_lat_e7_orig / 1e7))
+
+            def _label_torre_caja(i):
+                lon_i = round((_lon_e7_orig / 1e7 + _ltram * i / _mpg_lon) * 1e7)
+                return f"Intermedia {i}  ({_lat_e7_orig} / {lon_i})"
+
+            st.selectbox(
+                "Torre GPS", options=list(range(1, numero_tramos)),
+                key="k_caja_torre", disabled=locked,
+                format_func=_label_torre_caja,
+                help="Torre cuya posición se envía al Arduino como coordenada GPS.",
+            )
             st.markdown('<p style="font-size:0.875rem;margin:0 0 4px 0">Puerto serie Arduino</p>', unsafe_allow_html=True)
             c_pcaja, c_rcaja = st.columns([6, 1])
             with c_pcaja:
