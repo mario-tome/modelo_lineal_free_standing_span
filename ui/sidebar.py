@@ -1,3 +1,4 @@
+import math
 import streamlit as st
 from modelo import Lineal
 from logica.constantes import TERRENOS, get_defaults
@@ -214,16 +215,28 @@ def renderizar_sidebar():
                     st.rerun()
 
         if modo_caja:
-            st.selectbox(
-                "Torre GPS", options=list(range(1, numero_tramos)),
-                key="k_caja_torre", disabled=locked,
-                format_func=lambda i: f"Intermedia {i}",
-                help="Torre cuya posición se envía al Arduino como coordenada GPS.",
-            )
             st.session_state["k_caja_carr"] = 2
             c_lat_c, c_lon_c = st.columns(2)
             c_lat_c.number_input("Lat. origen (×10⁷)", value=404168000, step=1, key="k_caja_lat_e7", disabled=locked)
             c_lon_c.number_input("Lon. origen (×10⁷)", value=-37038000, step=1, key="k_caja_lon_e7", disabled=locked)
+
+            # Coordenadas iniciales de cada torre: posicion_y=0 en el origen,
+            # posicion_x = longitud_tramo * i → solo cambia la longitud
+            _lat_e7_orig = state.get("k_caja_lat_e7", 404168000)
+            _lon_e7_orig = state.get("k_caja_lon_e7", -37038000)
+            _ltram       = state.get("k_tlen", 50)
+            _mpg_lon     = 111320.0 * math.cos(math.radians(_lat_e7_orig / 1e7))
+
+            def _label_torre_caja(i):
+                lon_i = round((_lon_e7_orig / 1e7 + _ltram * i / _mpg_lon) * 1e7)
+                return f"Intermedia {i}  ({_lat_e7_orig} / {lon_i})"
+
+            st.selectbox(
+                "Torre GPS", options=list(range(1, numero_tramos)),
+                key="k_caja_torre", disabled=locked,
+                format_func=_label_torre_caja,
+                help="Torre cuya posición se envía al Arduino como coordenada GPS.",
+            )
             st.markdown('<p style="font-size:0.875rem;margin:0 0 4px 0">Puerto serie Arduino</p>', unsafe_allow_html=True)
             c_pcaja, c_rcaja = st.columns([6, 1])
             with c_pcaja:
@@ -247,22 +260,74 @@ def renderizar_sidebar():
                  "Se visualiza en el campo y se calculan EΔd y EΔrumbo en tiempo real.",
         )
         if state.get("k_tray_activa", False):
-            st.caption("Un punto por línea  ·  formato:  LAT×10⁷  LON×10⁷")
-            st.text_area(
-                "Puntos de trayectoria",
-                key="k_tray_input",
-                height=110,
-                label_visibility="collapsed",
-                placeholder="415191807 -37038000\n415195000 -37030000\n415200000 -37020000",
-            )
+            if "k_tray_puntos" not in state:
+                state.k_tray_puntos = []
+            if "k_tray_punto_contador" not in state:
+                state.k_tray_punto_contador = 0
+
+            _modo_con = state.get("k_conexion_modo", "ninguno")
+            if _modo_con == "caja":
+                _lat_def = state.get("k_caja_lat_e7", 404168000)
+                _lon_def = state.get("k_caja_lon_e7", -37038000)
+            elif _modo_con == "gps":
+                _lat_def = state.get("k_gps_lat_e7", 404168000)
+                _lon_def = state.get("k_gps_lon_e7", -37038000)
+            else:
+                _lat_def = 404168000
+                _lon_def = -37038000
+
+            _puntos = state.k_tray_puntos
+            if _puntos:
+                _ch1, _ch2, _ = st.columns([44, 44, 12])
+                _ch1.caption("Lat ×10⁷")
+                _ch2.caption("Lon ×10⁷")
+
+            _del_id = None
+            for _pto in _puntos:
+                _pid = _pto["id"]
+                _cl, _clo, _cd = st.columns([44, 44, 12])
+                with _cl:
+                    st.number_input(
+                        f"Lat punto {_pid}", value=_pto["lat"], step=1,
+                        key=f"k_tray_lat_{_pid}", label_visibility="collapsed",
+                    )
+                with _clo:
+                    st.number_input(
+                        f"Lon punto {_pid}", value=_pto["lon"], step=1,
+                        key=f"k_tray_lon_{_pid}", label_visibility="collapsed",
+                    )
+                with _cd:
+                    if st.button("✕", key=f"k_tray_del_{_pid}", help="Eliminar punto"):
+                        _del_id = _pid
+
+            if _del_id is not None:
+                state.k_tray_puntos = [p for p in state.k_tray_puntos if p["id"] != _del_id]
+                st.rerun()
+
+            if st.button("＋ Añadir punto", key="btn_tray_add"):
+                _nid = state.k_tray_punto_contador
+                state.k_tray_punto_contador += 1
+                state.k_tray_puntos.append({"id": _nid, "lat": _lat_def, "lon": _lon_def})
+                st.rerun()
+
+            _lineas_tray = []
+            for _pto in state.k_tray_puntos:
+                _pid = _pto["id"]
+                _lv  = state.get(f"k_tray_lat_{_pid}", _pto["lat"])
+                _lnv = state.get(f"k_tray_lon_{_pid}", _pto["lon"])
+                _lineas_tray.append(f"{_lv} {_lnv}")
+            state["k_tray_input"] = "\n".join(_lineas_tray)
+
             lat_sb, lon_sb = get_origen_latlon()
             puntos_sb = parse_trayectoria(state.get("k_tray_input", ""), lat_sb, lon_sb)
             if len(puntos_sb) >= 2:
-                st.caption(f"{len(puntos_sb)} puntos validos  ·  {len(puntos_sb) - 1} segmentos")
+                st.caption(f"{len(puntos_sb)} puntos válidos  ·  {len(puntos_sb) - 1} segmentos")
             elif len(puntos_sb) == 1:
-                st.caption("Minimo 2 puntos para definir un segmento")
+                st.caption("Mínimo 2 puntos para definir un segmento")
+            elif _puntos:
+                st.caption("Sin puntos válidos")
             else:
-                st.caption("Introduce puntos en el formato indicado")
+                st.caption("Sin puntos — pulsa ＋ para añadir")
 
         st.divider()
 
@@ -272,7 +337,7 @@ def renderizar_sidebar():
                 st.rerun()
 
         elif state.running:
-            if st.button("STOP / PAUSAR", key="btn_stop", width="stretch"):
+            if st.button("STOP", key="btn_stop", width="stretch"):
                 state.lineal.stop()
                 if state.lineal.gps:
                     state.lineal.gps.detener_transmision_background()
@@ -285,7 +350,7 @@ def renderizar_sidebar():
 
         elif state.paused and not state.finished:
             bc1, bc2 = st.columns(2)
-            if bc1.button("START / CONTINUAR", key="btn_start", type="primary", width="stretch"):
+            if bc1.button("START", key="btn_start", type="primary", width="stretch"):
                 state.lineal.start()
                 if state.lineal.gps:
                     state.lineal.gps.iniciar_transmision_background()
