@@ -16,17 +16,42 @@ def _avanzar_simulacion(sim: SimState) -> None:
     """
     lineal = sim.lineal
     if lineal is None:
+        sim.trayectoria_activa    = False
+        sim.trayectoria_puntos_xy = None
         return
 
-    ui = st.session_state  # widget keys: solo existen en esta sesión
+    ui = st.session_state  # widget keys: solo existen en la sesión del operador
 
-    # Sincronizar parámetros live del sidebar con el modelo
+    # ── Trayectoria: calcular una sola vez y publicar en el singleton ─────────
+    # Así el observador puede ver la línea y los errores sin tener los widgets.
+    if ui.get("k_tray_activa", False):
+        lat_t, lon_t = get_origen_latlon()
+        puntos_tray  = parse_trayectoria(ui.get("k_tray_input", ""), lat_t, lon_t)
+        if len(puntos_tray) >= 2:
+            sim.trayectoria_activa    = True
+            sim.trayectoria_puntos_xy = puntos_tray
+        else:
+            sim.trayectoria_activa    = False
+            sim.trayectoria_puntos_xy = None
+            puntos_tray               = []
+    else:
+        sim.trayectoria_activa    = False
+        sim.trayectoria_puntos_xy = None
+        puntos_tray               = []
+
+    # ── Sincronizar parámetros live del sidebar con el modelo ─────────────────
     lineal.set_speed(ui.get("k_vpct", 50))
     ruido_live = TERRENOS.get(ui.get("k_terreno", "Normal"), 0.012)
     lineal.guia_izquierda.ruido_lateral = ruido_live
     lineal.guia_derecha.ruido_lateral   = ruido_live
 
-    # Caja de interfaz: propagar flags y detectar cambios de estado
+    # Publicar parámetros de UI en el singleton para que el observador muestre
+    # exactamente la misma vista (barra de progreso, badge EN MARCHA, etc.)
+    sim.sim_auto_reverse = bool(ui.get("k_auto_reverse", False))
+    sim.sim_ar_ymin      = float(ui.get("k_ar_ymin", 0))
+    sim.sim_ar_ymax      = float(ui.get("k_ar_ymax", sim.longitud_campo))
+
+    # ── Caja de interfaz ──────────────────────────────────────────────────────
     if sim.running and lineal.caja_interfaz:
         caja = lineal.caja_interfaz
         prev = sim.caja_slow_prev
@@ -65,7 +90,7 @@ def _avanzar_simulacion(sim: SimState) -> None:
                 "msg": "SAFETY_OK — seguridad restaurada (reanuda manualmente)",
             })
 
-    # Avance de simulación
+    # ── Avance de simulación ──────────────────────────────────────────────────
     if sim.running and not sim.finished:
         segundos_simulacion = ui.get("k_simspd", 60)
         lineal.avanza(segundos_simulacion)
@@ -107,23 +132,22 @@ def _avanzar_simulacion(sim: SimState) -> None:
             fila["lat_e7"] = lineal.gps.lat_e7
             fila["lon_e7"] = lineal.gps.lon_e7
 
-        if ui.get("k_tray_activa", False):
-            lat_origen, lon_origen = get_origen_latlon()
-            puntos_trayectoria     = parse_trayectoria(ui.get("k_tray_input", ""), lat_origen, lon_origen)
-            torre_gps, indice_torre_gps = None, -1
+        # Errores de trayectoria en la fila CSV (usa puntos_tray ya calculado)
+        if sim.trayectoria_activa and puntos_tray:
+            torre_gps, idx_gps = None, -1
             if lineal.gps:
-                torre_gps        = lineal.gps.torre
-                indice_torre_gps = lineal.torres.index(torre_gps)
+                torre_gps = lineal.gps.torre
+                idx_gps   = lineal.torres.index(torre_gps)
             elif lineal.caja_interfaz:
-                torre_gps        = lineal.caja_interfaz.torre
-                indice_torre_gps = lineal.torres.index(torre_gps)
-            if torre_gps is not None and len(puntos_trayectoria) >= 2:
-                historial_torre = (sim.tower_trails[indice_torre_gps]
-                                   if sim.tower_trails and indice_torre_gps < len(sim.tower_trails) else [])
-                error_distancia, error_rumbo = calcular_errores(
-                    torre_gps.posicion_x, torre_gps.posicion_y, puntos_trayectoria, historial_torre)
-                fila["EΔd_mm"]      = round(error_distancia, 1) if error_distancia is not None else None
-                fila["EΔrumbo_deg"] = round(error_rumbo, 2)     if error_rumbo     is not None else None
+                torre_gps = lineal.caja_interfaz.torre
+                idx_gps   = lineal.torres.index(torre_gps)
+            if torre_gps is not None:
+                hist_torre = (sim.tower_trails[idx_gps]
+                              if sim.tower_trails and idx_gps < len(sim.tower_trails) else [])
+                ed, er = calcular_errores(torre_gps.posicion_x, torre_gps.posicion_y,
+                                          puntos_tray, hist_torre)
+                fila["EΔd_mm"]      = round(ed, 1) if ed is not None else None
+                fila["EΔrumbo_deg"] = round(er, 2) if er is not None else None
             else:
                 fila["EΔd_mm"] = fila["EΔrumbo_deg"] = None
         sim.historial.append(fila)
@@ -142,14 +166,14 @@ def _avanzar_simulacion(sim: SimState) -> None:
         # Log: cambios de alineación en tramos
         tramos_ok = [t.esta_alineado for t in lineal.tramos]
         if sim.tramos_ok_prev is not None:
-            for j, (estado_prev, estado_actual) in enumerate(zip(sim.tramos_ok_prev, tramos_ok)):
-                if estado_prev and not estado_actual:
+            for j, (ep, ea) in enumerate(zip(sim.tramos_ok_prev, tramos_ok)):
+                if ep and not ea:
                     sim.log.append({
                         "t":    lineal._tiempo_formateado(),
                         "tipo": "CRIT",
                         "msg":  f"Tramo {j+1} desalineado  ({lineal.tramos[j].desviacion_norte:+.3f} m)",
                     })
-                elif not estado_prev and estado_actual:
+                elif not ep and ea:
                     sim.log.append({
                         "t":    lineal._tiempo_formateado(),
                         "tipo": "OK",
@@ -158,9 +182,9 @@ def _avanzar_simulacion(sim: SimState) -> None:
         sim.tramos_ok_prev = tramos_ok
 
         # Auto-reverse o parada al llegar al límite del campo
-        auto_reverse = ui.get("k_auto_reverse", False)
-        limite_sur   = float(ui.get("k_ar_ymin", 0))
-        limite_norte = float(ui.get("k_ar_ymax", sim.longitud_campo))
+        auto_reverse = sim.sim_auto_reverse
+        limite_sur   = sim.sim_ar_ymin
+        limite_norte = sim.sim_ar_ymax
 
         if auto_reverse:
             pos = lineal.posicion_norte
@@ -197,25 +221,23 @@ def _avanzar_simulacion(sim: SimState) -> None:
                 st.rerun()
                 return
 
-    # Errores de trayectoria: calculados en cada refresco (running o parado)
-    # Solo el operador actualiza estos valores en el singleton compartido.
-    if ui.get("k_tray_activa", False) and lineal is not None:
-        lat_origen, lon_origen = get_origen_latlon()
-        puntos_trayectoria     = parse_trayectoria(ui.get("k_tray_input", ""), lat_origen, lon_origen)
-        torre_gps, indice_torre_gps = None, -1
+    # ── Errores de trayectoria: en cada refresco aunque esté pausado ──────────
+    # Solo el operador llama esta función → solo él escribe en sim.trayectoria_ead_mm
+    if sim.trayectoria_activa and puntos_tray:
+        torre_gps, idx_gps = None, -1
         if lineal.gps:
-            torre_gps        = lineal.gps.torre
-            indice_torre_gps = lineal.torres.index(torre_gps)
+            torre_gps = lineal.gps.torre
+            idx_gps   = lineal.torres.index(torre_gps)
         elif lineal.caja_interfaz:
-            torre_gps        = lineal.caja_interfaz.torre
-            indice_torre_gps = lineal.torres.index(torre_gps)
-        if torre_gps is not None and len(puntos_trayectoria) >= 2:
-            historial_torre = (sim.tower_trails[indice_torre_gps]
-                               if sim.tower_trails and indice_torre_gps < len(sim.tower_trails) else [])
-            error_distancia, error_rumbo = calcular_errores(
-                torre_gps.posicion_x, torre_gps.posicion_y, puntos_trayectoria, historial_torre)
-            sim.trayectoria_ead_mm     = error_distancia
-            sim.trayectoria_erumbo_deg = error_rumbo
+            torre_gps = lineal.caja_interfaz.torre
+            idx_gps   = lineal.torres.index(torre_gps)
+        if torre_gps is not None:
+            hist_torre = (sim.tower_trails[idx_gps]
+                          if sim.tower_trails and idx_gps < len(sim.tower_trails) else [])
+            ed, er = calcular_errores(torre_gps.posicion_x, torre_gps.posicion_y,
+                                      puntos_tray, hist_torre)
+            sim.trayectoria_ead_mm     = ed
+            sim.trayectoria_erumbo_deg = er
         else:
             sim.trayectoria_ead_mm = sim.trayectoria_erumbo_deg = None
     else:
@@ -224,17 +246,32 @@ def _avanzar_simulacion(sim: SimState) -> None:
 
 @st.fragment(run_every=1)
 def panel_principal():
-    sim            = get_sim()
+    sim    = get_sim()
     lineal: Lineal | None = sim.lineal
     longitud_campo = sim.longitud_campo
+    is_operator    = st.session_state.get("_is_operator", False)
 
     # Solo la sesión operador avanza la simulación
-    if st.session_state.get("_is_operator", False):
+    if is_operator:
         _avanzar_simulacion(sim)
         lineal = sim.lineal  # refresca ref tras el avance
 
     # ── CABECERA ──────────────────────────────────────────────────────────────
     st.markdown("# Gemelo Digital Lineal")
+
+    # Badge de modo observador
+    if not is_operator and sim.lineal is not None:
+        st.markdown(
+            "<div style='display:inline-flex;align-items:center;gap:8px;"
+            "background:rgba(88,166,255,0.08);border:1px solid rgba(88,166,255,0.25);"
+            "border-radius:20px;padding:5px 14px;margin:4px 0'>"
+            "<span style='width:8px;height:8px;border-radius:50%;background:#58a6ff;"
+            "display:inline-block'></span>"
+            "<span style='color:#58a6ff;font-weight:600;letter-spacing:1px;"
+            "font-size:0.85rem'>MODO OBSERVADOR — solo lectura</span>"
+            "</div>",
+            unsafe_allow_html=True,
+        )
 
     if sim.finished:
         st.markdown(
@@ -254,7 +291,7 @@ def panel_principal():
         )
     elif sim.running:
         en_marcha_atras = lineal is not None and lineal.en_marcha_atras
-        auto_reverse    = st.session_state.get("k_auto_reverse", False)
+        auto_reverse    = sim.sim_auto_reverse
         color           = "#ff7b72" if en_marcha_atras else "#3fb950"
         fondo           = "rgba(255,123,114,0.08)" if en_marcha_atras else "rgba(63,185,80,0.08)"
         borde           = "rgba(255,123,114,0.25)" if en_marcha_atras else "rgba(63,185,80,0.25)"
@@ -336,9 +373,9 @@ def panel_principal():
 
     # ── BARRA DE PROGRESO ─────────────────────────────────────────────────────
     if lineal:
-        auto_reverse = st.session_state.get("k_auto_reverse", False)
-        limite_sur   = float(st.session_state.get("k_ar_ymin", 0))
-        limite_norte = float(st.session_state.get("k_ar_ymax", longitud_campo))
+        auto_reverse = sim.sim_auto_reverse
+        limite_sur   = sim.sim_ar_ymin
+        limite_norte = sim.sim_ar_ymax
 
         if auto_reverse:
             amplitud_rango    = max(limite_norte - limite_sur, 1.0)
@@ -456,8 +493,10 @@ def panel_principal():
             unsafe_allow_html=True,
         )
 
-    # ── FIGURA: vista general · CSV · Log · GPS track ─────────────────────────
-    _tray_on = st.session_state.get("k_tray_activa", False)
+    # ── FIGURA: vista general · Δd · Δrumbo · CSV · Log · GPS track ──────────
+    # _tray_on: True si el operador tiene trayectoria activa (para ambas sesiones)
+    _tray_on = sim.trayectoria_activa or st.session_state.get("k_tray_activa", False)
+
     if _tray_on:
         col_toggle, col_ead, col_erm, col_csv, col_log, col_gps_track = st.columns([1, 1, 1, 1, 2, 3])
     else:
@@ -492,8 +531,7 @@ def panel_principal():
                 f"<div style='background:#161b22;border:1px solid #30363d;border-radius:6px;"
                 f"padding:0 12px;display:flex;align-items:center;gap:8px;height:38px;"
                 f"white-space:nowrap' title='Diferencia entre el azimut de movimiento real "
-                f"de la torre GPS y el azimut del segmento objetivo "
-                f"(0° = norte, + = desviado a la derecha, − = a la izquierda)'>"
+                f"de la torre GPS y el azimut del segmento objetivo'>"
                 f"<span style='font-size:0.85rem;color:#8b949e;font-family:monospace'>Δrumbo</span>"
                 f"<span style='font-size:0.85rem;font-weight:700;color:#e6edf3'>{_erm_str}</span>"
                 f"</div>",
@@ -546,11 +584,16 @@ def panel_principal():
                     )
 
     posicion_norte = lineal.posicion_norte if lineal is not None else 0.0
-    puntos_figura  = None
+
+    # Trayectoria para la figura:
+    #   · Operador: recalcula desde sus widgets (inmediato, sin delay)
+    #   · Observador: usa la copia publicada en el singleton por el operador
     if st.session_state.get("k_tray_activa", False) and lineal is not None:
         lat_fig, lon_fig = get_origen_latlon()
         puntos_fig       = parse_trayectoria(st.session_state.get("k_tray_input", ""), lat_fig, lon_fig)
         puntos_figura    = puntos_fig if len(puntos_fig) >= 2 else None
+    else:
+        puntos_figura = sim.trayectoria_puntos_xy  # None si no hay trayectoria activa
 
     st.plotly_chart(
         build_figure(

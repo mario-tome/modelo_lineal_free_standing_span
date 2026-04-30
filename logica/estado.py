@@ -7,6 +7,8 @@ SIM_KEYS = frozenset({
     "log", "historial", "gps_track", "tower_trails", "gps_prev",
     "vel_real", "pos_prev", "tramos_ok_prev", "ar_pasadas",
     "caja_slow_prev", "trayectoria_ead_mm", "trayectoria_erumbo_deg",
+    "trayectoria_activa", "trayectoria_puntos_xy",
+    "sim_auto_reverse", "sim_ar_ymin", "sim_ar_ymax",
 })
 
 

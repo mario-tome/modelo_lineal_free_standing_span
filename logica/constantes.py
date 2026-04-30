@@ -28,4 +28,9 @@ def get_defaults() -> dict:
         "caja_slow_prev":   {"cart": False, "end": False, "safety": True},
         "trayectoria_ead_mm":     None,
         "trayectoria_erumbo_deg": None,
+        "trayectoria_activa":     False,
+        "trayectoria_puntos_xy":  None,
+        "sim_auto_reverse": False,
+        "sim_ar_ymin":      0.0,
+        "sim_ar_ymax":      800.0,
     }

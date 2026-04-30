@@ -57,6 +57,14 @@ def manejar_teclado():
     sim = get_sim()
 
     estado_teclado = _giro_kbd(default=None)
+
+    # El componente de teclado se renderiza para todas las sesiones (necesario para
+    # el DOM), pero solo el operador puede modificar el estado de la simulación.
+    # Sin este guard, el teclado del observador (con left=False, right=False) machaca
+    # los flags slow_down que pone la caja Arduino en la sesión del operador.
+    if not st.session_state.get("_is_operator", False):
+        return
+
     if not isinstance(estado_teclado, dict):
         return
 

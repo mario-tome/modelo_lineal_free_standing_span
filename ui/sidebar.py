@@ -15,6 +15,102 @@ SIN_PUERTO      = "— Sin puerto (solo consola) —"
 SIN_CAJA_PUERTO = "— Selecciona puerto —"
 
 
+def _renderizar_sidebar_observador(sim):
+    """Sidebar de solo lectura para sesiones que no son el operador."""
+    st.markdown(
+        "<div style='display:inline-flex;align-items:center;gap:8px;"
+        "background:rgba(88,166,255,0.08);border:1px solid rgba(88,166,255,0.25);"
+        "border-radius:20px;padding:5px 14px;margin:4px 0 12px 0'>"
+        "<span style='width:8px;height:8px;border-radius:50%;background:#58a6ff;"
+        "display:inline-block'></span>"
+        "<span style='color:#58a6ff;font-weight:600;letter-spacing:1px;"
+        "font-size:0.85rem'>OBSERVADOR — solo lectura</span>"
+        "</div>",
+        unsafe_allow_html=True,
+    )
+
+    if sim.lineal is None:
+        st.info("Esperando que el operador inicie la simulación…")
+        return
+
+    lineal = sim.lineal
+
+    st.markdown("##### Configuración activa")
+    c1, c2 = st.columns(2)
+    c1.metric("N° tramos",    lineal.numero_tramos)
+    c2.metric("Long. tramo",  f"{lineal.longitud_tramo} m")
+    c1.metric("Vel. nominal", f"{lineal.velocidad_nominal} m/min")
+    c2.metric("Campo total",  f"{sim.longitud_campo} m")
+
+    velocidad_media = lineal.velocidad_nominal * lineal.velocidad_porcentaje / 100.0
+    st.markdown(
+        f"<div style='background:#161b22;border:1px solid #30363d;border-radius:8px;"
+        f"padding:8px 12px;margin:2px 0 10px 0;display:flex;justify-content:space-between'>"
+        f"<span><span style='color:#8b949e;font-size:0.7rem'>Panel speed </span>"
+        f"<b style='color:#e6edf3;font-family:monospace'>{lineal.velocidad_porcentaje} %</b></span>"
+        f"<span><span style='color:#8b949e;font-size:0.7rem'>MEDIA </span>"
+        f"<b style='color:#3fb950;font-family:monospace'>{velocidad_media:.2f} m/min</b></span>"
+        f"</div>",
+        unsafe_allow_html=True,
+    )
+
+    st.divider()
+    st.markdown("##### Conexión")
+    if lineal.caja_interfaz:
+        st.markdown(
+            "<span style='color:#e6edf3;font-size:0.85rem'>"
+            "Caja de interfaz Arduino (115 200 baud)</span>",
+            unsafe_allow_html=True,
+        )
+    elif lineal.gps:
+        st.markdown(
+            "<span style='color:#e6edf3;font-size:0.85rem'>"
+            "GPS directo (9 600 baud)</span>",
+            unsafe_allow_html=True,
+        )
+    else:
+        st.markdown(
+            "<span style='color:#8b949e;font-size:0.85rem'>Sin conexión externa</span>",
+            unsafe_allow_html=True,
+        )
+
+    if sim.sim_auto_reverse:
+        st.divider()
+        st.markdown("##### Auto-reverse")
+        st.markdown(
+            f"<span style='color:#e6edf3;font-size:0.85rem'>"
+            f"Activo · {sim.sim_ar_ymin:.0f} m — {sim.sim_ar_ymax:.0f} m · "
+            f"<b>{sim.ar_pasadas}</b> inversiones</span>",
+            unsafe_allow_html=True,
+        )
+
+    if sim.trayectoria_activa and sim.trayectoria_puntos_xy:
+        st.divider()
+        st.markdown("##### Trayectoria objetivo GPS")
+        n = len(sim.trayectoria_puntos_xy)
+        st.markdown(
+            f"<span style='color:#e6edf3;font-size:0.85rem'>"
+            f"Activa · {n} puntos · {n - 1} segmentos</span>",
+            unsafe_allow_html=True,
+        )
+
+    st.divider()
+    st.markdown("##### Teclado")
+    st.caption("Control exclusivo del operador")
+    for tecla, descripcion in [
+        ("< (mantener)", "Ralentiza Cart"),
+        ("- (mantener)", "Ralentiza End-tower"),
+        ("R (pulsar)",   "Marcha atrás / avance normal"),
+    ]:
+        st.markdown(
+            f"<code style='background:#161b22;border:1px solid #30363d;border-radius:4px;"
+            f"padding:1px 6px;font-size:0.78rem;color:#484f58'>{tecla}</code>"
+            f"<span style='color:#484f58;font-size:0.78rem;margin-left:6px'>{descripcion}</span>",
+            unsafe_allow_html=True,
+        )
+    st.divider()
+
+
 def _iniciar_simulacion(numero_tramos, longitud_tramo, porcentaje_velocidad, velocidad_nominal, longitud_campo):
     sim   = get_sim()
     state = st.session_state
@@ -89,6 +185,11 @@ def renderizar_sidebar():
         sim    = get_sim()
         state  = st.session_state
         locked = sim.lineal is not None
+
+        # Sesión no-operador con simulación ya activa → solo lectura
+        if not state.get("_is_operator", False) and locked:
+            _renderizar_sidebar_observador(sim)
+            return
 
         st.markdown("##### Geometria del Lineal")
         if locked:
@@ -335,6 +436,23 @@ def renderizar_sidebar():
                 st.caption("Sin puntos válidos")
             else:
                 st.caption("Sin puntos — pulsa ＋ para añadir")
+
+        # Solo el operador publica la trayectoria en el singleton.
+        # El observador no tiene k_tray_activa ni k_tray_input; si ejecutara este
+        # bloque sin guarda, machacaría lo que publicó el operador con None.
+        if st.session_state.get("_is_operator", False):
+            if state.get("k_tray_activa", False):
+                lat_p, lon_p = get_origen_latlon()
+                pts = parse_trayectoria(state.get("k_tray_input", ""), lat_p, lon_p)
+                if len(pts) >= 2:
+                    sim.trayectoria_activa    = True
+                    sim.trayectoria_puntos_xy = pts
+                else:
+                    sim.trayectoria_activa    = False
+                    sim.trayectoria_puntos_xy = None
+            else:
+                sim.trayectoria_activa    = False
+                sim.trayectoria_puntos_xy = None
 
         st.divider()
 
