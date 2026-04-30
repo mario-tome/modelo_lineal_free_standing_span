@@ -1,5 +1,6 @@
 import csv
 import io
+import math
 import streamlit as st
 from modelo import Lineal
 from logica.constantes import TERRENOS
@@ -65,10 +66,15 @@ def panel_principal():
         lineal.avanza(segundos_simulacion)
 
         if state.tower_trails is not None and len(state.tower_trails) == len(lineal.torres):
-            for indice_torre, torre in enumerate(lineal.torres):
-                state.tower_trails[indice_torre].append((torre.posicion_x, torre.posicion_y))
-            if len(state.tower_trails[0]) > 2000:
-                state.tower_trails = [tr[-2000:] for tr in state.tower_trails]
+            for idx, torre in enumerate(lineal.torres):
+                trail = state.tower_trails[idx]
+                xn, yn = torre.posicion_x, torre.posicion_y
+                # Solo guardar si la torre se movió ≥ 0.5 m desde el último punto registrado.
+                # Así el trail cubre siempre toda la ruta real sin importar k_simspd.
+                if not trail or math.hypot(xn - trail[-1][0], yn - trail[-1][1]) >= 0.5:
+                    trail.append((xn, yn))
+            if len(state.tower_trails[0]) > 20_000:
+                state.tower_trails = [tr[-20_000:] for tr in state.tower_trails]
 
         state.vel_real = (lineal.posicion_norte - state.pos_prev) / (segundos_simulacion / 60.0)
         state.pos_prev = lineal.posicion_norte
