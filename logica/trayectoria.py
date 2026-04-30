@@ -60,6 +60,7 @@ def calcular_errores(gps_x: float, gps_y: float, puntos_trayectoria: list, histo
 
     x_inicio, y_inicio = puntos_trayectoria[indice_segmento]
     x_fin,    y_fin    = puntos_trayectoria[indice_segmento + 1]
+    # atan2(Δx, Δy) en lugar de (Δy, Δx): convenio de azimut geográfico (0° = Norte)
     azimut_objetivo    = math.degrees(math.atan2(x_fin - x_inicio, y_fin - y_inicio))
 
     error_rumbo = None
@@ -71,6 +72,7 @@ def calcular_errores(gps_x: float, gps_y: float, puntos_trayectoria: list, histo
         if delta_x_movimiento ** 2 + delta_y_movimiento ** 2 > 1e-10:
             azimut_actual = math.degrees(math.atan2(delta_x_movimiento, delta_y_movimiento))
             diferencia    = azimut_actual - azimut_objetivo
+            # Normaliza la diferencia angular para que quede en el rango (-180°, 180°]
             while diferencia >  180: diferencia -= 360
             while diferencia < -180: diferencia += 360
             error_rumbo = diferencia

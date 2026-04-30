@@ -1,3 +1,5 @@
+# Desviación lateral máxima (en metros por metro avanzado) que introduce cada tipo de terreno.
+# Un valor de 0.012 significa que la torre puede desviarse hasta ±1,2 cm por cada metro que avanza.
 TERRENOS = {
     "Perfecto (sin ruido)":   0.000,
     "Poco":                  0.006,
