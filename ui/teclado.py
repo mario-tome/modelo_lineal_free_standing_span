@@ -9,7 +9,7 @@ with open(os.path.join(_DIRECTORIO_KBD, "index.html"), "w", encoding="utf-8") as
         <!DOCTYPE html><html><head><script>
             var _init = false;
             var _st   = {left: false, right: false, reverse: false};
-            
+
             function _send() {
                 window.parent.postMessage({
                     isStreamlitMessage: true,
@@ -18,10 +18,10 @@ with open(os.path.join(_DIRECTORIO_KBD, "index.html"), "w", encoding="utf-8") as
                     dataType: 'json'
                 }, '*');
             }
-            
+
             window.addEventListener('message', function(ev) {
                 if (!ev.data || ev.data.type !== 'streamlit:render') return;
-                
+
                 if (!_init) {
                     _init = true;
                     window.parent.document.addEventListener('keydown', function(e) {
@@ -32,7 +32,7 @@ with open(os.path.join(_DIRECTORIO_KBD, "index.html"), "w", encoding="utf-8") as
                         if (e.key.toLowerCase() === 'r'){ _st.reverse = !_st.reverse;  ch = true; }
                         if (ch) _send();
                     });
-                    
+
                     window.parent.document.addEventListener('keyup', function(e) {
                         var ch = false;
                         if (e.key === '<') { _st.left  = false; ch = true; }
@@ -40,11 +40,11 @@ with open(os.path.join(_DIRECTORIO_KBD, "index.html"), "w", encoding="utf-8") as
                         if (ch) _send();
                     });
                 }
-             
+
                 window.parent.postMessage(
                     {isStreamlitMessage: true, type: 'streamlit:setFrameHeight', height: 0}, '*');
             });
-             
+
             window.parent.postMessage(
                 {isStreamlitMessage: true, type: 'streamlit:componentReady', apiVersion: 1}, '*');
         </script></head><body></body></html>""")
@@ -53,30 +53,32 @@ _giro_kbd = components.declare_component("pivot_giro_kbd", path=_DIRECTORIO_KBD)
 
 
 def manejar_teclado():
+    from logica.estado import get_sim
+    sim = get_sim()
+
     estado_teclado = _giro_kbd(default=None)
     if not isinstance(estado_teclado, dict):
         return
 
-    # Marcha atrás (tecla R)
+    # Marcha atrás (tecla R) — el flag de toggle es per-sesión
     kbd_reverse_ahora  = estado_teclado.get("reverse", False)
     kbd_reverse_previo = st.session_state.marcha_atras_kbd
     if kbd_reverse_ahora != kbd_reverse_previo:
         st.session_state.marcha_atras_kbd = kbd_reverse_ahora
-        if st.session_state.lineal and st.session_state.running:
-            lineal = st.session_state.lineal
+        if sim.lineal and sim.running:
+            lineal = sim.lineal
             lineal.invertir_direccion()
-            texto_direccion = "MARCHA ATRÁS activada" if lineal.en_marcha_atras else "Avance normal activado"
-            st.session_state.log.append({
+            sim.log.append({
                 "t":    lineal._tiempo_formateado(),
                 "tipo": "INFO",
-                "msg":  texto_direccion,
+                "msg":  "MARCHA ATRÁS activada" if lineal.en_marcha_atras else "Avance normal activado",
             })
 
-    # Ralentización por teclado: < → ralentiza Cart  /  - → ralentiza End-tower
-    if st.session_state.lineal and st.session_state.running:
-        lineal = st.session_state.lineal
+    # Ralentización por teclado: < → Cart  /  - → End-tower
+    if sim.lineal and sim.running:
+        lineal = sim.lineal
         ralentizar_cart = bool(estado_teclado.get("left",  False))
-        ralentizar_end = bool(estado_teclado.get("right", False))
+        ralentizar_end  = bool(estado_teclado.get("right", False))
 
         if ralentizar_cart != lineal.slow_down_cart or ralentizar_end != lineal.slow_down_end_tower:
             lineal.slow_down_cart      = ralentizar_cart
@@ -87,7 +89,7 @@ def manejar_teclado():
                 mensaje = "Teclado - — End-tower ralentizado, giro gradual hacia derecha"
             else:
                 mensaje = "Teclado liberado — velocidad normal"
-            st.session_state.log.append({
+            sim.log.append({
                 "t":    lineal._tiempo_formateado(),
                 "tipo": "INFO",
                 "msg":  mensaje,

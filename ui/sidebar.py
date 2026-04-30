@@ -2,6 +2,7 @@ import math
 import streamlit as st
 from modelo import Lineal
 from logica.constantes import TERRENOS, get_defaults
+from logica.estado import get_sim, SIM_KEYS
 from logica.trayectoria import get_origen_latlon, parse_trayectoria
 
 try:
@@ -15,60 +16,68 @@ SIN_CAJA_PUERTO = "— Selecciona puerto —"
 
 
 def _iniciar_simulacion(numero_tramos, longitud_tramo, porcentaje_velocidad, velocidad_nominal, longitud_campo):
+    sim   = get_sim()
     state = st.session_state
     ruido_terreno = TERRENOS.get(state.get("k_terreno", "Normal"), 0.012)
-    state.lineal = Lineal(
-        numero_tramos = numero_tramos,
-        longitud_tramo = longitud_tramo,
+    sim.lineal = Lineal(
+        numero_tramos        = numero_tramos,
+        longitud_tramo       = longitud_tramo,
         velocidad_porcentaje = porcentaje_velocidad,
-        velocidad_nominal = velocidad_nominal,
-        ruido_lateral = ruido_terreno,
+        velocidad_nominal    = velocidad_nominal,
+        ruido_lateral        = ruido_terreno,
     )
-    state.lineal.start()
-    state.log.append({"t": "00h 00m 00s", "tipo": "START", "msg": "Sistema iniciado"})
+    sim.lineal.start()
+    sim.log.append({"t": "00h 00m 00s", "tipo": "START", "msg": "Sistema iniciado"})
 
     modo_conexion = state.get("k_conexion_modo", "ninguno")
     if modo_conexion == "gps":
         puerto_raw = state.get("k_gps_puerto", SIN_PUERTO)
         puerto = None if (puerto_raw == SIN_PUERTO) else puerto_raw
-        state.lineal.asignar_gps(
-            indice_torre = state.get("k_gps_torre", 1),
-            lat_origen = state.get("k_gps_lat_e7", 404168000) / 1e7,
-            lon_origen = state.get("k_gps_lon_e7", -37038000) / 1e7,
-            puerto_serial = puerto,
+        sim.lineal.asignar_gps(
+            indice_torre    = state.get("k_gps_torre", 1),
+            lat_origen      = state.get("k_gps_lat_e7", 404168000) / 1e7,
+            lon_origen      = state.get("k_gps_lon_e7", -37038000) / 1e7,
+            puerto_serial   = puerto,
             verbose_consola = (puerto is None),
         )
-        state.lineal.gps.iniciar_transmision_background()
+        sim.lineal.gps.iniciar_transmision_background()
 
     if modo_conexion == "caja":
         puerto_caja = state.get("k_caja_puerto", "")
         if puerto_caja and puerto_caja != SIN_CAJA_PUERTO:
-            state.lineal.asignar_caja(
-                indice_torre = state.get("k_caja_torre", 1),
-                lat_origen = state.get("k_caja_lat_e7", 404168000) / 1e7,
-                lon_origen = state.get("k_caja_lon_e7", -37038000) / 1e7,
+            sim.lineal.asignar_caja(
+                indice_torre  = state.get("k_caja_torre", 1),
+                lat_origen    = state.get("k_caja_lat_e7", 404168000) / 1e7,
+                lon_origen    = state.get("k_caja_lon_e7", -37038000) / 1e7,
                 puerto_serial = puerto_caja,
-                carr = state.get("k_caja_carr", 2),
+                carr          = state.get("k_caja_carr", 2),
             )
-            state.lineal.caja_interfaz.iniciar()
+            sim.lineal.caja_interfaz.iniciar()
 
-    state.longitud_campo = longitud_campo
-    state.running = True
-    state.finished = False
-    state.paused = False
-    state.caja_slow_prev = {"cart": False, "end": False, "safety": True}
-    state.tower_trails = [[] for _ in range(len(state.lineal.torres))]
+    sim.longitud_campo  = longitud_campo
+    sim.running         = True
+    sim.finished        = False
+    sim.paused          = False
+    sim.caja_slow_prev  = {"cart": False, "end": False, "safety": True}
+    sim.tower_trails    = [[] for _ in range(len(sim.lineal.torres))]
+
+    # Marcar esta sesión como operador
+    st.session_state["_is_operator"] = True
 
 
 def _limpiar_y_resetear():
-    state = st.session_state
-    if state.lineal and state.lineal.gps:
-        state.lineal.gps.detener_transmision_background()
-    if state.lineal and state.lineal.caja_interfaz:
-        state.lineal.caja_interfaz.detener()
-    valores_defecto = get_defaults()
-    for clave, valor in valores_defecto.items():
-        state[clave] = valor
+    sim = get_sim()
+    if sim.lineal and sim.lineal.gps:
+        sim.lineal.gps.detener_transmision_background()
+    if sim.lineal and sim.lineal.caja_interfaz:
+        sim.lineal.caja_interfaz.detener()
+    # Resetear estado de simulación al estado inicial
+    fresh = get_defaults()
+    for clave in SIM_KEYS:
+        sim[clave] = fresh[clave]
+    # Resetear estado per-sesión relevante
+    st.session_state["marcha_atras_kbd"] = False
+    st.session_state["_is_operator"]     = False
 
 
 def renderizar_sidebar():
@@ -77,8 +86,9 @@ def renderizar_sidebar():
         st.caption("Configura tu Gemelo Digital")
         st.divider()
 
+        sim    = get_sim()
         state  = st.session_state
-        locked = state.lineal is not None
+        locked = sim.lineal is not None
 
         st.markdown("##### Geometria del Lineal")
         if locked:
@@ -87,11 +97,11 @@ def renderizar_sidebar():
                 "Simulacion activa — parametros bloqueados</span>",
                 unsafe_allow_html=True,
             )
-        
+
         c1, c2 = st.columns(2)
-        numero_tramos = c1.number_input("N° de tramos", 3, 20, 5, 1, disabled=locked, key="k_tramos")
+        numero_tramos  = c1.number_input("N° de tramos", 3, 20, 5, 1, disabled=locked, key="k_tramos")
         longitud_tramo = c2.number_input("Long. tramo (m)", 5, 500, 50, 5, disabled=locked, key="k_tlen")
-        
+
         c3, c4 = st.columns(2)
         velocidad_nominal = c3.number_input("Vel. nominal (m/min)", 0.5, 10.0, 3.0, 0.5, disabled=locked, key="k_vnom")
         longitud_campo    = c4.number_input("Campo total (m)",      100, 5000, 800, 50,  disabled=locked, key="k_campo")
@@ -164,10 +174,9 @@ def renderizar_sidebar():
             )
             limite_sur_display   = state.get("k_ar_ymin", limite_sur_defecto)
             limite_norte_display = state.get("k_ar_ymax", limite_norte_defecto)
-            pasadas              = state.get("ar_pasadas", 0)
             st.caption(
                 f"Rebota entre **{limite_sur_display} m** y **{limite_norte_display} m**"
-                + (f"  ·  **{pasadas}** inversiones" if state.running else "")
+                + (f"  ·  **{sim.ar_pasadas}** inversiones" if sim.running else "")
             )
 
         st.divider()
@@ -220,8 +229,6 @@ def renderizar_sidebar():
             c_lat_c.number_input("Lat. origen (×10⁷)", value=404168000, step=1, key="k_caja_lat_e7", disabled=locked)
             c_lon_c.number_input("Lon. origen (×10⁷)", value=-37038000, step=1, key="k_caja_lon_e7", disabled=locked)
 
-            # Coordenadas iniciales de cada torre: posicion_y=0 en el origen,
-            # posicion_x = longitud_tramo * i → solo cambia la longitud
             _lat_e7_orig = state.get("k_caja_lat_e7", 404168000)
             _lon_e7_orig = state.get("k_caja_lon_e7", -37038000)
             _ltram       = state.get("k_tlen", 50)
@@ -331,38 +338,46 @@ def renderizar_sidebar():
 
         st.divider()
 
-        if state.lineal is None:
+        if sim.lineal is None:
             if st.button("INICIAR", key="btn_iniciar", type="primary", width="stretch"):
                 _iniciar_simulacion(numero_tramos, longitud_tramo, porcentaje_velocidad, velocidad_nominal, longitud_campo)
                 st.rerun()
 
-        elif state.running:
+        elif sim.running:
             if st.button("STOP", key="btn_stop", width="stretch"):
-                state.lineal.stop()
-                if state.lineal.gps:
-                    state.lineal.gps.detener_transmision_background()
-                if state.lineal.caja_interfaz:
-                    state.lineal.caja_interfaz.detener()
-                state.log.append({"t": state.lineal._tiempo_formateado(), "tipo": "STOP", "msg": f"Sistema pausado en {state.lineal.posicion_norte:.2f} m"})
-                state.running   = False
-                state.paused    = True
+                sim.lineal.stop()
+                if sim.lineal.gps:
+                    sim.lineal.gps.detener_transmision_background()
+                if sim.lineal.caja_interfaz:
+                    sim.lineal.caja_interfaz.detener()
+                sim.log.append({
+                    "t":    sim.lineal._tiempo_formateado(),
+                    "tipo": "STOP",
+                    "msg":  f"Sistema pausado en {sim.lineal.posicion_norte:.2f} m",
+                })
+                sim.running = False
+                sim.paused  = True
                 st.rerun()
 
-        elif state.paused and not state.finished:
+        elif sim.paused and not sim.finished:
             bc1, bc2 = st.columns(2)
             if bc1.button("START", key="btn_start", type="primary", width="stretch"):
-                state.lineal.start()
-                if state.lineal.gps:
-                    state.lineal.gps.iniciar_transmision_background()
-                state.log.append({"t": state.lineal._tiempo_formateado(), "tipo": "START", "msg": f"Sistema reanudado desde {state.lineal.posicion_norte:.2f} m"})
-                state.running = True
-                state.paused = False
+                sim.lineal.start()
+                if sim.lineal.gps:
+                    sim.lineal.gps.iniciar_transmision_background()
+                sim.log.append({
+                    "t":    sim.lineal._tiempo_formateado(),
+                    "tipo": "START",
+                    "msg":  f"Sistema reanudado desde {sim.lineal.posicion_norte:.2f} m",
+                })
+                sim.running = True
+                sim.paused  = False
                 st.rerun()
             if bc2.button("RESET", key="btn_reset", width="stretch"):
                 _limpiar_y_resetear()
                 st.rerun()
 
-        elif state.finished:
+        elif sim.finished:
             if st.button("REINICIAR", key="btn_reiniciar", type="primary", width="stretch"):
                 _limpiar_y_resetear()
                 st.rerun()
