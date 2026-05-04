@@ -59,6 +59,11 @@ def _avanzar_simulacion(sim: SimState) -> None:
     ruido_live = TERRENOS.get(ui.get("k_terreno", "Normal"), 0.012)
     lineal.guia_izquierda.ruido_lateral = ruido_live
     lineal.guia_derecha.ruido_lateral   = ruido_live
+    interferencia_mm = float(ui.get("k_interferencia_gps_mm", 0))
+    if lineal.gps:
+        lineal.gps.interferencia_gps_mm = interferencia_mm
+    elif lineal.caja_interfaz:
+        lineal.caja_interfaz.interferencia_gps_mm = interferencia_mm
 
     # Publicar parámetros de UI en el singleton para que el observador muestre
     # exactamente la misma vista (barra de progreso, badge EN MARCHA, etc.)

@@ -371,6 +371,21 @@ def renderizar_sidebar():
                     st.rerun()
             st.caption("Arduino conectado a este PC · cable USB normal · Carr=2 (RTK FIX) fijo")
 
+        if modo_gps or modo_caja:
+            st.divider()
+            st.markdown("##### Interferencia GPS simulada")
+            interferencia = st.slider(
+                "Desvío aleatorio por emisión (mm)",
+                min_value=0, max_value=15, value=0, step=1,
+                key="k_interferencia_gps_mm",
+                help="Cada segundo se suma un error aleatorio de ±X mm a la coordenada "
+                     "enviada al Arduino. 0 = posición perfecta. 15 = máximo error real RTK.",
+            )
+            if interferencia > 0:
+                st.caption(f"Enviando coordenada con ±{interferencia} mm de ruido aleatorio")
+            else:
+                st.caption("Sin interferencia — coordenada perfecta")
+
         st.divider()
         st.markdown("##### Trayectoria objetivo GPS")
         st.toggle(
