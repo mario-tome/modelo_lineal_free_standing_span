@@ -491,7 +491,7 @@ def renderizar_sidebar():
 
         elif sim.paused and not sim.finished:
             bc1, bc2 = st.columns(2)
-            if bc1.button("START", key="btn_start", type="primary", width="stretch"):
+            if bc1.button("CONTINUE", key="btn_start", type="primary", width="stretch"):
                 sim.lineal.start()
                 if sim.lineal.gps:
                     sim.lineal.gps.iniciar_transmision_background()
