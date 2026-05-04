@@ -9,6 +9,7 @@ SIM_KEYS = frozenset({
     "caja_slow_prev", "trayectoria_ead_mm", "trayectoria_erumbo_deg",
     "trayectoria_activa", "trayectoria_puntos_xy",
     "sim_auto_reverse", "sim_ar_ymin", "sim_ar_ymax",
+    "csv_ruta", "csv_filas_escritas",
 })
 
 

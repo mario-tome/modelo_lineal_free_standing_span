@@ -35,4 +35,6 @@ def get_defaults() -> dict:
         "sim_auto_reverse": False,
         "sim_ar_ymin":      0.0,
         "sim_ar_ymax":      800.0,
+        "csv_ruta":             None,  # ruta al fichero CSV en disco
+        "csv_filas_escritas":   0,     # contador de filas para mostrar en UI
     }

@@ -1,12 +1,27 @@
 import csv
 import io
 import math
+import os
 import streamlit as st
 from modelo import Lineal
 from logica.constantes import TERRENOS
 from logica.estado import get_sim, SimState
 from logica.trayectoria import get_origen_latlon, parse_trayectoria, calcular_errores
 from ui.figura import build_figure
+
+
+def _escribir_fila_csv(sim: SimState, fila: dict) -> None:
+    """Añade una fila al CSV en disco. Crea cabecera en la primera escritura."""
+    ruta = sim.get("csv_ruta")
+    if not ruta:
+        return
+    primera_vez = (sim.csv_filas_escritas == 0)
+    with open(ruta, "a", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=list(fila.keys()), restval="", extrasaction="ignore")
+        if primera_vez:
+            writer.writeheader()
+        writer.writerow(fila)
+    sim.csv_filas_escritas += 1
 
 
 def _avanzar_simulacion(sim: SimState) -> None:
@@ -107,7 +122,9 @@ def _avanzar_simulacion(sim: SimState) -> None:
         sim.vel_real = (lineal.posicion_norte - sim.pos_prev) / (segundos_simulacion / 60.0)
         sim.pos_prev = lineal.posicion_norte
 
-        # Construir fila CSV
+        # Construir fila CSV.
+        # lat_e7, lon_e7, EΔd_mm y EΔrumbo_deg se inicializan siempre a None
+        # para garantizar que la cabecera sea idéntica en todas las ejecuciones.
         fila = {
             "tiempo_s":       lineal.tiempo_total_segundos,
             "tiempo":         lineal._tiempo_formateado(),
@@ -128,11 +145,12 @@ def _avanzar_simulacion(sim: SimState) -> None:
                 fila[f"tramo_{j+1}_deform_m"]    = round(longitud_tramo_nominal - longitud_calculada, 4)
                 fila[f"tramo_{j+1}_desv_y"]      = round(delta_y, 4)
                 fila[f"tramo_{j+1}_rumbo_deg"]   = round(tramo.angulo_grados, 4)
-        if lineal.gps:
-            fila["lat_e7"] = lineal.gps.lat_e7
-            fila["lon_e7"] = lineal.gps.lon_e7
+        fila["lat_e7"] = lineal.gps.lat_e7 if lineal.gps else None
+        fila["lon_e7"] = lineal.gps.lon_e7 if lineal.gps else None
 
         # Errores de trayectoria en la fila CSV (usa puntos_tray ya calculado)
+        fila["EΔd_mm"]      = None
+        fila["EΔrumbo_deg"] = None
         if sim.trayectoria_activa and puntos_tray:
             torre_gps, idx_gps = None, -1
             if lineal.gps:
@@ -148,9 +166,10 @@ def _avanzar_simulacion(sim: SimState) -> None:
                                           puntos_tray, hist_torre)
                 fila["EΔd_mm"]      = round(ed, 1) if ed is not None else None
                 fila["EΔrumbo_deg"] = round(er, 2) if er is not None else None
-            else:
-                fila["EΔd_mm"] = fila["EΔrumbo_deg"] = None
-        sim.historial.append(fila)
+
+        # Escribe la fila directamente a disco para no acumular datos en memoria.
+        # El fichero puede crecer sin límite durante días sin afectar a la RAM.
+        _escribir_fila_csv(sim, fila)
 
         if lineal.gps:
             sim.gps_track.append({
@@ -540,23 +559,32 @@ def panel_principal():
 
     if lineal:
         with col_csv:
-            if sim.historial:
-                buf = io.StringIO()
-                todos_los_campos = list(dict.fromkeys(
-                    campo for fila in sim.historial for campo in fila.keys()
-                ))
-                writer = csv.DictWriter(buf, fieldnames=todos_los_campos, restval="")
-                writer.writeheader()
-                writer.writerows(sim.historial)
-                st.download_button(
-                    label="⬇ CSV",
-                    data=buf.getvalue(),
-                    file_name="simulacion_lineal.csv",
-                    mime="text/csv",
-                    width="stretch",
-                )
+            tiene_datos = sim.csv_ruta and sim.csv_filas_escritas > 0
+            if tiene_datos:
+                if sim.running:
+                    # No generar el botón mientras corre: cada segundo el fichero
+                    # cambia → hash distinto → MediaFileStorageError acumulado.
+                    # El fichero crece en disco sin límite; la RAM no se ve afectada.
+                    st.markdown(
+                        f"<div style='color:#484f58;font-size:0.78rem;font-family:monospace;"
+                        f"padding:8px 0'>{sim.csv_filas_escritas:,} filas grabadas</div>",
+                        unsafe_allow_html=True,
+                    )
+                else:
+                    # Parado o pausado: el fichero ya no cambia → hash estable → sin errores.
+                    with open(sim.csv_ruta, "rb") as _f:
+                        csv_bytes = _f.read()
+                    st.download_button(
+                        label="⬇ CSV",
+                        data=csv_bytes,
+                        file_name=os.path.basename(sim.csv_ruta),
+                        mime="text/csv",
+                        width="stretch",
+                    )
 
         with col_log:
+            if len(sim.log) > 1_000:
+                sim.log = sim.log[-1_000:]
             colores_tipo = {
                 "START": "#3fb950", "STOP": "#e3b341", "FIN": "#3fb950",
                 "CRIT":  "#f85149", "OK":   "#58a6ff", "INFO": "#8b949e",

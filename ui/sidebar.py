@@ -1,9 +1,14 @@
 import math
+import os
+from datetime import datetime
 import streamlit as st
 from modelo import Lineal
 from logica.constantes import TERRENOS, get_defaults
 from logica.estado import get_sim, SIM_KEYS
 from logica.trayectoria import get_origen_latlon, parse_trayectoria
+
+# Carpeta de exportaciones junto al raíz del proyecto
+_DIR_EXPORTS = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "exports")
 
 try:
     import serial.tools.list_ports as _list_ports
@@ -156,6 +161,13 @@ def _iniciar_simulacion(numero_tramos, longitud_tramo, porcentaje_velocidad, vel
     sim.paused          = False
     sim.caja_slow_prev  = {"cart": False, "end": False, "safety": True}
     sim.tower_trails    = [[] for _ in range(len(sim.lineal.torres))]
+
+    # Crear fichero CSV en disco donde se escribirá cada fila sin límite de tamaño.
+    # Se usa append-mode tick a tick para no acumular datos en memoria.
+    os.makedirs(_DIR_EXPORTS, exist_ok=True)
+    marca_tiempo            = datetime.now().strftime("%Y%m%d_%H%M%S")
+    sim.csv_ruta            = os.path.join(_DIR_EXPORTS, f"simulacion_{marca_tiempo}.csv")
+    sim.csv_filas_escritas  = 0
 
     # Marcar esta sesión como operador
     st.session_state["_is_operator"] = True
