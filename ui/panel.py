@@ -168,7 +168,7 @@ def _avanzar_simulacion(sim: SimState) -> None:
                 hist_torre = (sim.tower_trails[idx_gps]
                               if sim.tower_trails and idx_gps < len(sim.tower_trails) else [])
                 ed, er = calcular_errores(torre_gps.posicion_x, torre_gps.posicion_y,
-                                          puntos_tray, hist_torre)
+                                          puntos_tray, hist_torre, lineal.en_marcha_atras)
                 fila["EΔd_mm"]      = round(ed, 1) if ed is not None else None
                 fila["EΔrumbo_deg"] = round(er, 2) if er is not None else None
 
@@ -259,7 +259,7 @@ def _avanzar_simulacion(sim: SimState) -> None:
             hist_torre = (sim.tower_trails[idx_gps]
                           if sim.tower_trails and idx_gps < len(sim.tower_trails) else [])
             ed, er = calcular_errores(torre_gps.posicion_x, torre_gps.posicion_y,
-                                      puntos_tray, hist_torre)
+                                      puntos_tray, hist_torre, lineal.en_marcha_atras)
             sim.trayectoria_ead_mm     = ed
             sim.trayectoria_erumbo_deg = er
         else:

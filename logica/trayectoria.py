@@ -32,7 +32,8 @@ def parse_trayectoria(texto: str, lat_origen: float, lon_origen: float) -> list:
     return puntos
 
 
-def calcular_errores(gps_x: float, gps_y: float, puntos_trayectoria: list, historial_posiciones: list) -> tuple:
+def calcular_errores(gps_x: float, gps_y: float, puntos_trayectoria: list,
+                     historial_posiciones: list, en_marcha_atras: bool = False) -> tuple:
     if len(puntos_trayectoria) < 2:
         return None, None
 
@@ -61,7 +62,11 @@ def calcular_errores(gps_x: float, gps_y: float, puntos_trayectoria: list, histo
     x_inicio, y_inicio = puntos_trayectoria[indice_segmento]
     x_fin,    y_fin    = puntos_trayectoria[indice_segmento + 1]
     # atan2(Δx, Δy) en lugar de (Δy, Δx): convenio de azimut geográfico (0° = Norte)
-    azimut_objetivo    = math.degrees(math.atan2(x_fin - x_inicio, y_fin - y_inicio))
+    azimut_objetivo = math.degrees(math.atan2(x_fin - x_inicio, y_fin - y_inicio))
+    # En marcha atrás el lineal recorre la trayectoria en sentido contrario,
+    # por lo que el azimut de referencia se invierte 180° para no generar falsos errores.
+    if en_marcha_atras:
+        azimut_objetivo += 180.0
 
     error_rumbo = None
     if historial_posiciones and len(historial_posiciones) >= 2:
