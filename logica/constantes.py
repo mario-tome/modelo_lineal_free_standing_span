@@ -27,7 +27,8 @@ def get_defaults() -> dict:
         "tower_trails":    None,
         "marcha_atras_kbd": False,
         "ar_pasadas":       0,
-        "caja_slow_prev":   {"cart": False, "end": False, "safety": True},
+        "caja_slow_prev":   {"cart": False, "end": False, "safety": True, "gps": True},
+        "motivo_pausa":     None,  # "gps_fail" | "safety_fail" | "manual" | None
         "trayectoria_ead_mm":     None,
         "trayectoria_erumbo_deg": None,
         "trayectoria_activa":     False,

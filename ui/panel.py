@@ -72,43 +72,77 @@ def _avanzar_simulacion(sim: SimState) -> None:
     sim.sim_ar_ymax      = float(ui.get("k_ar_ymax", sim.longitud_campo))
 
     # ── Caja de interfaz ──────────────────────────────────────────────────────
-    if sim.running and lineal.caja_interfaz:
+    # Las señales de velocidad solo se procesan en marcha.
+    # Safety y GPS se monitorizan siempre (también en pausa) para poder
+    # detectar la recuperación y reanudar automáticamente si procede.
+    if lineal.caja_interfaz:
         caja = lineal.caja_interfaz
         prev = sim.caja_slow_prev
 
-        if caja.slow_down_cart != prev["cart"]:
-            prev["cart"] = caja.slow_down_cart
-            sim.log.append({
-                "t": lineal._tiempo_formateado(), "tipo": "INFO",
-                "msg": ("SLOW_DOWN_CART ON — Cart ralentizado, giro gradual hacia izquierda"
-                        if caja.slow_down_cart else "SLOW_DOWN_CART OFF — Cart a velocidad normal"),
-            })
-        if caja.slow_down_end_tower != prev["end"]:
-            prev["end"] = caja.slow_down_end_tower
-            sim.log.append({
-                "t": lineal._tiempo_formateado(), "tipo": "INFO",
-                "msg": ("SLOW_DOWN_END_TOWER ON — End-tower ralentizado, giro gradual hacia derecha"
-                        if caja.slow_down_end_tower else "SLOW_DOWN_END_TOWER OFF — End-tower a velocidad normal"),
-            })
+        if sim.running:
+            if caja.slow_down_cart != prev["cart"]:
+                prev["cart"] = caja.slow_down_cart
+                sim.log.append({
+                    "t": lineal._tiempo_formateado(), "tipo": "INFO",
+                    "msg": ("SLOW_DOWN_CART ON — Cart ralentizado, giro gradual hacia izquierda"
+                            if caja.slow_down_cart else "SLOW_DOWN_CART OFF — Cart a velocidad normal"),
+                })
+            if caja.slow_down_end_tower != prev["end"]:
+                prev["end"] = caja.slow_down_end_tower
+                sim.log.append({
+                    "t": lineal._tiempo_formateado(), "tipo": "INFO",
+                    "msg": ("SLOW_DOWN_END_TOWER ON — End-tower ralentizado, giro gradual hacia derecha"
+                            if caja.slow_down_end_tower else "SLOW_DOWN_END_TOWER OFF — End-tower a velocidad normal"),
+                })
+            lineal.slow_down_cart      = caja.slow_down_cart
+            lineal.slow_down_end_tower = caja.slow_down_end_tower
 
-        lineal.slow_down_cart      = caja.slow_down_cart
-        lineal.slow_down_end_tower = caja.slow_down_end_tower
-
-        if not caja.safety_ok and prev["safety"]:
+        # Safety: parada de emergencia, siempre requiere confirmación manual
+        if not caja.safety_ok and prev.get("safety", True):
             prev["safety"] = False
             lineal.stop()
             sim.log.append({
                 "t": lineal._tiempo_formateado(), "tipo": "CRIT",
                 "msg": "SAFETY_FAIL — parada de emergencia",
             })
-            sim.running = False
-            sim.paused  = True
-        elif caja.safety_ok and not prev["safety"]:
+            sim.running      = False
+            sim.paused       = True
+            sim.motivo_pausa = "safety_fail"
+        elif caja.safety_ok and not prev.get("safety", True):
             prev["safety"] = True
             sim.log.append({
                 "t": lineal._tiempo_formateado(), "tipo": "OK",
                 "msg": "SAFETY_OK — seguridad restaurada (reanuda manualmente)",
             })
+
+        # GPS: pausa automática al perder señal, reanudación automática al recuperarla
+        if not caja.gps_ok and prev.get("gps", True):
+            prev["gps"] = False
+            if sim.running:
+                lineal.stop()
+                sim.running      = False
+                sim.paused       = True
+                sim.motivo_pausa = "gps_fail"
+            sim.log.append({
+                "t": lineal._tiempo_formateado(), "tipo": "CRIT",
+                "msg": "GPS_FAIL — señal GPS perdida, simulación pausada",
+            })
+        elif caja.gps_ok and not prev.get("gps", True):
+            prev["gps"] = True
+            sim.log.append({
+                "t": lineal._tiempo_formateado(), "tipo": "OK",
+                "msg": "GPS_OK — señal GPS restaurada",
+            })
+            if sim.paused and sim.motivo_pausa == "gps_fail":
+                lineal.start()
+                caja.iniciar()
+                sim.running      = True
+                sim.paused       = False
+                sim.motivo_pausa = None
+                sim.log.append({
+                    "t": lineal._tiempo_formateado(), "tipo": "START",
+                    "msg": "Reanudación automática tras recuperar GPS",
+                })
 
     # ── Avance de simulación ──────────────────────────────────────────────────
     if sim.running and not sim.finished:
@@ -502,16 +536,16 @@ def panel_principal():
         columnas_caja[4].metric("Slow Cart",  "ON" if caja.slow_down_cart      else "—")
         columnas_caja[5].metric("Slow EndT",  "ON" if caja.slow_down_end_tower else "—")
         st.markdown(
-            f"<div style='display:flex;gap:8px;margin:-12px 0 8px 0;flex-wrap:wrap'>"
-            f"<span style='font-size:0.72rem;color:{color_safety};font-family:monospace'>"
+            f"<div style='display:flex;gap:12px;margin:-12px 0 8px 0;flex-wrap:wrap;align-items:center'>"
+            f"<span style='font-size:0.92rem;font-weight:700;color:{color_safety};font-family:monospace'>"
             f"&#9679; SAFETY {'OK' if caja.safety_ok else 'FAIL'}</span>"
-            f"<span style='font-size:0.72rem;color:{color_gps};font-family:monospace'>"
+            f"<span style='font-size:0.92rem;font-weight:700;color:{color_gps};font-family:monospace'>"
             f"&#9679; GPS {'OK' if caja.gps_ok else 'FAIL'}</span>"
-            f"<span style='font-size:0.72rem;color:{color_cart};font-family:monospace'>"
+            f"<span style='font-size:0.92rem;font-weight:700;color:{color_cart};font-family:monospace'>"
             f"&#9679; SLOW_CART {'ON' if caja.slow_down_cart else 'OFF'}</span>"
-            f"<span style='font-size:0.72rem;color:{color_end};font-family:monospace'>"
+            f"<span style='font-size:0.92rem;font-weight:700;color:{color_end};font-family:monospace'>"
             f"&#9679; SLOW_END_TWR {'ON' if caja.slow_down_end_tower else 'OFF'}</span>"
-            f"<span style='font-size:0.72rem;color:#484f58;font-family:monospace'>"
+            f"<span style='font-size:0.82rem;color:#484f58;font-family:monospace'>"
             f"último msg: {caja.ultimo_mensaje or '—'}</span>"
             f"</div>",
             unsafe_allow_html=True,
@@ -522,9 +556,9 @@ def panel_principal():
     _tray_on = sim.trayectoria_activa or st.session_state.get("k_tray_activa", False)
 
     if _tray_on:
-        col_toggle, col_ead, col_erm, col_csv, col_log, col_gps_track = st.columns([1, 1, 1, 1, 2, 3])
+        col_toggle, col_ead, col_erm, col_log, col_csv, col_gps_track = st.columns([1, 1, 1, 3, 1, 3])
     else:
-        col_toggle, col_csv, col_log, col_gps_track = st.columns([1, 1, 2, 4])
+        col_toggle, col_log, col_csv, col_gps_track = st.columns([1, 3, 1, 4])
         col_ead = col_erm = None
 
     with col_toggle:
@@ -565,27 +599,17 @@ def panel_principal():
     if lineal:
         with col_csv:
             tiene_datos = sim.csv_ruta and sim.csv_filas_escritas > 0
-            if tiene_datos:
-                if sim.running:
-                    # No generar el botón mientras corre: cada segundo el fichero
-                    # cambia → hash distinto → MediaFileStorageError acumulado.
-                    # El fichero crece en disco sin límite; la RAM no se ve afectada.
-                    st.markdown(
-                        f"<div style='color:#484f58;font-size:0.78rem;font-family:monospace;"
-                        f"padding:8px 0'>{sim.csv_filas_escritas:,} filas grabadas</div>",
-                        unsafe_allow_html=True,
-                    )
-                else:
-                    # Parado o pausado: el fichero ya no cambia → hash estable → sin errores.
-                    with open(sim.csv_ruta, "rb") as _f:
-                        csv_bytes = _f.read()
-                    st.download_button(
-                        label="⬇ CSV",
-                        data=csv_bytes,
-                        file_name=os.path.basename(sim.csv_ruta),
-                        mime="text/csv",
-                        width="stretch",
-                    )
+            if tiene_datos and not sim.running:
+                # Parado o pausado: el fichero ya no cambia → hash estable → sin errores.
+                with open(sim.csv_ruta, "rb") as _f:
+                    csv_bytes = _f.read()
+                st.download_button(
+                    label="⬇ CSV",
+                    data=csv_bytes,
+                    file_name=os.path.basename(sim.csv_ruta),
+                    mime="text/csv",
+                    width="stretch",
+                )
 
         with col_log:
             if len(sim.log) > 1_000:

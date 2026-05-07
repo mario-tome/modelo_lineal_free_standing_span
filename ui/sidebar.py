@@ -500,27 +500,42 @@ def renderizar_sidebar():
                     "tipo": "STOP",
                     "msg":  f"Sistema pausado en {sim.lineal.posicion_norte:.2f} m",
                 })
-                sim.running = False
-                sim.paused  = True
+                sim.running      = False
+                sim.paused       = True
+                sim.motivo_pausa = "manual"
                 st.rerun()
 
         elif sim.paused and not sim.finished:
+            caja = sim.lineal.caja_interfaz
+            safety_en_fallo = caja is not None and not caja.safety_ok
+            gps_en_fallo    = caja is not None and not caja.gps_ok
+            continuar_bloqueado = safety_en_fallo or gps_en_fallo
+
             bc1, bc2 = st.columns(2)
-            if bc1.button("CONTINUE", key="btn_start", type="primary", width="stretch"):
+            if bc1.button("CONTINUAR", key="btn_start", type="primary",
+                          width="stretch", disabled=continuar_bloqueado):
                 sim.lineal.start()
                 if sim.lineal.gps:
                     sim.lineal.gps.iniciar_transmision_background()
+                if sim.lineal.caja_interfaz:
+                    sim.lineal.caja_interfaz.iniciar()
                 sim.log.append({
                     "t":    sim.lineal._tiempo_formateado(),
                     "tipo": "START",
                     "msg":  f"Sistema reanudado desde {sim.lineal.posicion_norte:.2f} m",
                 })
-                sim.running = True
-                sim.paused  = False
+                sim.running      = True
+                sim.paused       = False
+                sim.motivo_pausa = None
                 st.rerun()
             if bc2.button("RESET", key="btn_reset", width="stretch"):
                 _limpiar_y_resetear()
                 st.rerun()
+
+            if safety_en_fallo:
+                st.error("SAFETY FAIL activo — resuelve el problema antes de continuar")
+            elif gps_en_fallo:
+                st.warning("GPS FAIL activo — esperando que se restaure la señal GPS")
 
         elif sim.finished:
             if st.button("REINICIAR", key="btn_reiniciar", type="primary", width="stretch"):
