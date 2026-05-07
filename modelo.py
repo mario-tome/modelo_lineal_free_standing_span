@@ -234,6 +234,24 @@ class Tramo:
         return abs(self.desviacion_norte_relativa) < self.TOLERANCIA_ALINEACION
 
 
+def _aplicar_interferencia_gps(lat_e7: int, lon_e7: int,
+                               interferencia_mm: float,
+                               lat_origen: float) -> tuple:
+    """
+    Añade una desviación aleatoria de ±interferencia_mm milímetros a las coordenadas GPS.
+    Simula el error real de un receptor GPS RTK (normalmente ≤ 150 mm).
+    Devuelve (lat_e7, lon_e7) con ruido sin tocar las coordenadas originales del modelo.
+    """
+    if interferencia_mm == 0.0:
+        return lat_e7, lon_e7
+    metros_por_grado_lon = METROS_POR_GRADO_LAT * math.cos(math.radians(lat_origen))
+    desvio_lat_m = random.uniform(-interferencia_mm, interferencia_mm) / 1000.0
+    desvio_lon_m = random.uniform(-interferencia_mm, interferencia_mm) / 1000.0
+    lat_con_ruido = lat_e7 + round(desvio_lat_m / METROS_POR_GRADO_LAT * 1e7)
+    lon_con_ruido = lon_e7 + round(desvio_lon_m / metros_por_grado_lon * 1e7)
+    return lat_con_ruido, lon_con_ruido
+
+
 # GPS virtual asignado a una Torre_Intermedia
 # Convierte X/Y (metros) a lat/lon reales usando el Cart como origen geográfico
 # Emite coordenadas como enteros ×10⁷ por puerto serie cada segundo
@@ -254,9 +272,10 @@ class GPS:
         self.puerto_serial = puerto_serial
         self.baudrate = baudrate
         self.verbose_consola = verbose_consola
-        self._conexion = None   
-        self._hilo = None   
+        self._conexion = None
+        self._hilo = None
         self._activo = False
+        self.interferencia_gps_mm: float = 0.0  # desvío aleatorio en mm añadido a cada emisión
 
     @property
     def latitud(self) -> float:
@@ -309,7 +328,10 @@ class GPS:
                 return
 
         while self._activo:
-            mensaje = f"LAT:{self.lat_e7},LON:{self.lon_e7}\n"
+            lat_emitido, lon_emitido = _aplicar_interferencia_gps(
+                self.lat_e7, self.lon_e7, self.interferencia_gps_mm, self.lat_origen
+            )
+            mensaje = f"LAT:{lat_emitido},LON:{lon_emitido}\n"
             if conexion is not None:
                 try:
                     conexion.write(mensaje.encode("utf-8"))
@@ -318,7 +340,7 @@ class GPS:
                     print(f"Error en transmisión: {e}")
                     break
             if self.verbose_consola:
-                print(f"GPS {mensaje.strip()}  ({self.latitud:.7f}°, {self.longitud:.7f}°)")
+                print(f"GPS {mensaje.strip()}  (real: {self.latitud:.7f}°, {self.longitud:.7f}°)")
             _time.sleep(1.0)
 
         if conexion is not None:
@@ -358,6 +380,7 @@ class CajaInterfaz:
 
         self._activo = False
         self._hilo = None
+        self.interferencia_gps_mm: float = 0.0  # desvío aleatorio en mm añadido a cada emisión
 
     @property
     def latitud(self) -> float:
@@ -410,7 +433,10 @@ class CajaInterfaz:
 
             # Enviar GPS al Arduino cada segundo
             if ahora - ultimo_envio >= 1.0:
-                trama = f"Lat {self.lat_e7} Lon {self.lon_e7} Carr {self.carr}\n"
+                lat_emitido, lon_emitido = _aplicar_interferencia_gps(
+                    self.lat_e7, self.lon_e7, self.interferencia_gps_mm, self.lat_origen
+                )
+                trama = f"Lat {lat_emitido} Lon {lon_emitido} Carr {self.carr}\n"
                 try:
                     ser.write(trama.encode("utf-8"))
                     ser.flush()

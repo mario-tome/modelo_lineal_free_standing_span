@@ -41,6 +41,7 @@ def _estilo_torre(lineal: Lineal, i: int):
 def build_figure(lineal: Lineal | None, longitud_campo: float, pos_norte: float = 0.0,
                  vista_general: bool = False, tower_trails: list | None = None,
                  trayectoria_xy: list | None = None) -> go.Figure:
+    """Construye la figura Plotly del campo y devuelve el objeto Figure listo para renderizar."""
     if lineal is None:
         fig = go.Figure()
         fig.update_layout(
@@ -104,41 +105,25 @@ def build_figure(lineal: Lineal | None, longitud_campo: float, pos_norte: float 
             x0=0, y0=0, x1=ancho_campo, y1=min_y,
             fillcolor="rgba(63,185,80,0.10)", line=dict(width=0), layer="below"))
 
+    # Cuadrícula horizontal (líneas de referencia de avance norte)
     paso_filas = max(2, int((y_hi - y_lo) / 40))
-    gx, gy = [], []
+    xs_cuad, ys_cuad = [], []
     for y in range(0, int(alto_campo) + 1, paso_filas):
-        gx += [0, ancho_campo, None]; gy += [y, y, None]
-    trazos.append(go.Scatter(x=gx, y=gy, mode="lines",
+        xs_cuad += [0, ancho_campo, None]
+        ys_cuad += [y, y, None]
+    trazos.append(go.Scatter(x=xs_cuad, y=ys_cuad, mode="lines",
         line=dict(color="rgba(255,255,255,0.04)", width=1),
         hoverinfo="skip", showlegend=False))
 
-    vx, vy = [], []
+    # Columnas verticales alineadas con cada tramo
+    xs_col, ys_col = [], []
     for i in range(lineal.numero_tramos + 1):
         xv = i * lineal.longitud_tramo
-        vx += [xv, xv, None]; vy += [0, alto_campo, None]
-    trazos.append(go.Scatter(x=vx, y=vy, mode="lines",
+        xs_col += [xv, xv, None]
+        ys_col += [0, alto_campo, None]
+    trazos.append(go.Scatter(x=xs_col, y=ys_col, mode="lines",
         line=dict(color="rgba(255,255,255,0.04)", width=1, dash="dot"),
         hoverinfo="skip", showlegend=False))
-
-    indice_rigido = lineal.indice_tramo_rigido
-    rx1 = lineal.torres[indice_rigido].posicion_x
-    rx2 = lineal.torres[indice_rigido + 1].posicion_x
-    formas.append(dict(type="rect", xref="x", yref="paper",
-        x0=rx1, y0=0, x1=rx2, y1=1,
-        fillcolor="rgba(255,166,87,0.07)",
-        line=dict(color="rgba(255,166,87,0.30)", width=1, dash="dot"),
-        layer="below"))
-
-    anotaciones.append(dict(
-        x=(rx1 + rx2) / 2, y=1.0,
-        text="TRAMO RIGIDO",
-        showarrow=False,
-        font=dict(color="#ffa657", size=13, family="monospace"),
-        bgcolor="rgba(13,17,23,0.6)",
-        bordercolor="#ffa657", borderwidth=1,
-        xref="x", yref="paper",
-        yanchor="top",
-    ))
 
     if tower_trails:
         for indice_torre in range(len(lineal.torres)):
@@ -195,49 +180,25 @@ def build_figure(lineal: Lineal | None, longitud_campo: float, pos_norte: float 
         nombre_izq = _nombre_torre_corto(lineal, idx)
         nombre_der = _nombre_torre_corto(lineal, idx + 1)
 
-        if tramo.es_rigido:
-            hover = (
-                f"<b>Tramo {idx + 1}  [RIGIDO]</b><br>"
-                f"{nombre_izq} ══ {nombre_der}<br>"
-                f"Bloque rígido — ambas torres se mueven como una unidad<br>"
-                f"No aplica medición de desviación relativa"
-                f"<extra></extra>"
-            )
-        else:
-            hover = (
-                f"<b>Tramo {idx + 1}</b>  {nombre_izq} → {nombre_der}<br>"
-                f"Angulo rel: <b>{angulo:+.3f} grd</b><br>"
-                f"Desviacion rel: {tramo.desviacion_norte_relativa:+.3f} m<br>"
-                f"Estado: {'OK' if tramo.esta_alineado else 'DESVIADO'}"
-                f"<extra></extra>"
-            )
+        hover = (
+            f"<b>Tramo {idx + 1}</b>  {nombre_izq} → {nombre_der}<br>"
+            f"Angulo rel: <b>{angulo:+.3f} grd</b><br>"
+            f"Desviacion rel: {tramo.desviacion_norte_relativa:+.3f} m<br>"
+            f"Estado: {'OK' if tramo.esta_alineado else 'DESVIADO'}"
+            f"<extra></extra>"
+        )
 
-        if tramo.es_rigido:
-            trazos.append(go.Scatter(x=[x1, x2], y=[y1, y2], mode="lines",
-                line=dict(color="#ffa657", width=28), opacity=0.15,
-                hoverinfo="skip", showlegend=False))
-            trazos.append(go.Scatter(x=[x1, x2], y=[y1, y2], mode="lines",
-                line=dict(color=color, width=8),
-                hovertemplate=hover, showlegend=False))
-            trazos.append(go.Scatter(x=[x1, x2], y=[y1, y2], mode="lines",
-                line=dict(color="#ffa657", width=3, dash="dash"),
-                hoverinfo="skip", showlegend=False))
-        else:
-            trazos.append(go.Scatter(x=[x1, x2], y=[y1, y2], mode="lines",
-                line=dict(color=color, width=14), opacity=0.12,
-                hoverinfo="skip", showlegend=False))
-            trazos.append(go.Scatter(x=[x1, x2], y=[y1, y2], mode="lines",
-                line=dict(color=color, width=4),
-                hovertemplate=hover, showlegend=False))
+        trazos.append(go.Scatter(x=[x1, x2], y=[y1, y2], mode="lines",
+            line=dict(color=color, width=14), opacity=0.12,
+            hoverinfo="skip", showlegend=False))
+        trazos.append(go.Scatter(x=[x1, x2], y=[y1, y2], mode="lines",
+            line=dict(color=color, width=4),
+            hovertemplate=hover, showlegend=False))
 
         mx, my = (x1 + x2) / 2, (y1 + y2) / 2
-        borde_anotacion = "#ffa657" if tramo.es_rigido else color
-
         if tramo.es_rigido:
-            # El FSS es un bloque rígido: solo se muestra la etiqueta, sin datos de desviación
             texto_anotacion = f"<b>T{idx + 1}  FSS</b>"
         else:
-            # Muestra qué torres se están comparando y los valores de desviación
             texto_anotacion = (
                 f"<b>T{idx + 1}</b>  {nombre_izq}→{nombre_der}<br>"
                 f"{angulo:+.2f}°  /  {tramo.desviacion_norte_relativa:+.3f} m"
@@ -249,7 +210,7 @@ def build_figure(lineal: Lineal | None, longitud_campo: float, pos_norte: float 
             showarrow=False,
             font=dict(color=color, size=11, family="monospace"),
             bgcolor="rgba(13,17,23,0.82)",
-            bordercolor=borde_anotacion, borderwidth=1,
+            bordercolor=color, borderwidth=1,
             borderpad=5,
             xref="x", yref="y",
             align="center",
@@ -265,7 +226,7 @@ def build_figure(lineal: Lineal | None, longitud_campo: float, pos_norte: float 
         elif i == numero_torres - 1:
             nombre = "End-tower"
         elif isinstance(torre, Torre_Intermedia) and torre.es_motor_rapido:
-            nombre = f"Intermedia {i}  [Motor Rapido — extremo der tramo rigido]"
+            nombre = f"Intermedia {i}  [Motor Rapido]"
         elif i <= lineal.indice_tramo_rigido:
             nombre = f"Intermedia {i}  [cascada izquierda]"
         else:
