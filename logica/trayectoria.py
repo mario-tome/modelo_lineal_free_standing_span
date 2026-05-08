@@ -1,6 +1,6 @@
 import math
 import streamlit as st
-from modelo import METROS_POR_GRADO_LAT
+from modelos import METROS_POR_GRADO_LAT
 
 
 def get_origen_latlon() -> tuple:

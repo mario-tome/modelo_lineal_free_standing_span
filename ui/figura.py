@@ -1,6 +1,6 @@
 import math
 import plotly.graph_objects as go
-from modelo import Lineal, Torre_Guia, Torre_Intermedia
+from modelos import Lineal, Torre_Guia, Torre_Intermedia
 
 
 def _nombre_torre_corto(lineal: Lineal, indice: int) -> str:

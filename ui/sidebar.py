@@ -2,7 +2,7 @@ import math
 import os
 from datetime import datetime
 import streamlit as st
-from modelo import Lineal
+from modelos import Lineal
 from logica.constantes import TERRENOS, get_defaults
 from logica.estado import get_sim, SIM_KEYS
 from logica.trayectoria import get_origen_latlon, parse_trayectoria

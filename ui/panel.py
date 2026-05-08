@@ -3,7 +3,7 @@ import io
 import math
 import os
 import streamlit as st
-from modelo import Lineal
+from modelos import Lineal
 from logica.constantes import TERRENOS
 from logica.estado import get_sim, SimState
 from logica.trayectoria import get_origen_latlon, parse_trayectoria, calcular_errores
