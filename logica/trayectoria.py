@@ -2,8 +2,8 @@ import math
 import streamlit as st
 from modelos import METROS_POR_GRADO_LAT
 
-
 def get_origen_latlon() -> tuple:
+    """Obtiene la latitud y longitud de origen según el modo de conexión"""
     modo = st.session_state.get("k_conexion_modo", "ninguno")
     if modo == "caja":
         return (st.session_state.get("k_caja_lat_e7", 404168000) / 1e7,
@@ -15,6 +15,7 @@ def get_origen_latlon() -> tuple:
 
 
 def parse_trayectoria(texto: str, lat_origen: float, lon_origen: float) -> list:
+    """Convierte un texto con líneas "lat_e7 lon_e7" en una lista de puntos (x, y) en metros"""
     metros_por_grado_lon = METROS_POR_GRADO_LAT * math.cos(math.radians(lat_origen))
     puntos = []
     for linea in texto.strip().splitlines():
@@ -34,6 +35,7 @@ def parse_trayectoria(texto: str, lat_origen: float, lon_origen: float) -> list:
 
 def calcular_errores(gps_x: float, gps_y: float, puntos_trayectoria: list,
                      historial_posiciones: list, en_marcha_atras: bool = False) -> tuple:
+    """Calcula el error de distancia (en mm) y rumbo (en grados) respecto a la trayectoria"""
     if len(puntos_trayectoria) < 2:
         return None, None
 
@@ -61,10 +63,9 @@ def calcular_errores(gps_x: float, gps_y: float, puntos_trayectoria: list,
 
     x_inicio, y_inicio = puntos_trayectoria[indice_segmento]
     x_fin,    y_fin    = puntos_trayectoria[indice_segmento + 1]
-    # atan2(Δx, Δy) en lugar de (Δy, Δx): convenio de azimut geográfico (0° = Norte)
     azimut_objetivo = math.degrees(math.atan2(x_fin - x_inicio, y_fin - y_inicio))
-    # En marcha atrás el lineal recorre la trayectoria en sentido contrario,
-    # por lo que el azimut de referencia se invierte 180° para no generar falsos errores.
+    
+    # En marcha atrás el azimut de referencia se invierte 180°
     if en_marcha_atras:
         azimut_objetivo += 180.0
 
