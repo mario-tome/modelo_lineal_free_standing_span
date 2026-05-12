@@ -1,17 +1,13 @@
-import csv
-import io
-import math
-import os
+import csv, math, os
 import streamlit as st
-from modelo import Lineal
+from modelos import Lineal
 from logica.constantes import TERRENOS
 from logica.estado import get_sim, SimState
 from logica.trayectoria import get_origen_latlon, parse_trayectoria, calcular_errores
 from ui.figura import build_figure
 
-
 def _escribir_fila_csv(sim: SimState, fila: dict) -> None:
-    """Añade una fila al CSV en disco. Crea cabecera en la primera escritura."""
+    """Añade una fila al CSV en disco. Crea cabecera en la primera escritura"""
     ruta = sim.get("csv_ruta")
     if not ruta:
         return
@@ -26,8 +22,8 @@ def _escribir_fila_csv(sim: SimState, fila: dict) -> None:
 
 def _avanzar_simulacion(sim: SimState) -> None:
     """
-    Avanza la simulación un tick y actualiza todos los datos derivados.
-    Solo debe llamarse desde la sesión que inició la simulación (_is_operator).
+    Avanza la simulación un tick y actualiza todos los datos derivados (trayectoria, errores, CSV, log, etc.)
+    Solo debe llamarse desde la sesión que inició la simulación (_is_operator)
     """
     lineal = sim.lineal
     if lineal is None:
@@ -37,8 +33,8 @@ def _avanzar_simulacion(sim: SimState) -> None:
 
     ui = st.session_state  # widget keys: solo existen en la sesión del operador
 
-    # ── Trayectoria: calcular una sola vez y publicar en el singleton ─────────
-    # Así el observador puede ver la línea y los errores sin tener los widgets.
+    # Trayectoria: calcular una sola vez y publicar en el singleton para que el observador la muestre sin recalcularla
+    # Observador puede ver la línea y los errores sin tener los widgets
     if ui.get("k_tray_activa", False):
         lat_t, lon_t = get_origen_latlon()
         puntos_tray  = parse_trayectoria(ui.get("k_tray_input", ""), lat_t, lon_t)
@@ -54,7 +50,7 @@ def _avanzar_simulacion(sim: SimState) -> None:
         sim.trayectoria_puntos_xy = None
         puntos_tray               = []
 
-    # ── Sincronizar parámetros live del sidebar con el modelo ─────────────────
+    # Sincronizar parámetros live del sidebar con el modelo
     lineal.set_speed(ui.get("k_vpct", 50))
     ruido_live = TERRENOS.get(ui.get("k_terreno", "Normal"), 0.012)
     lineal.guia_izquierda.ruido_lateral = ruido_live
@@ -71,10 +67,9 @@ def _avanzar_simulacion(sim: SimState) -> None:
     sim.sim_ar_ymin      = float(ui.get("k_ar_ymin", 0))
     sim.sim_ar_ymax      = float(ui.get("k_ar_ymax", sim.longitud_campo))
 
-    # ── Caja de interfaz ──────────────────────────────────────────────────────
-    # Las señales de velocidad solo se procesan en marcha.
-    # Safety y GPS se monitorizan siempre (también en pausa) para poder
-    # detectar la recuperación y reanudar automáticamente si procede.
+    # Caja de interfaz
+    # Las señales de velocidad solo se procesan en marcha
+    # Safety y GPS se monitorizan siempre (también en pausa) para poder detectar la recuperación y reanudar automáticamente si procede
     if lineal.caja_interfaz:
         caja = lineal.caja_interfaz
         prev = sim.caja_slow_prev
@@ -120,8 +115,8 @@ def _avanzar_simulacion(sim: SimState) -> None:
             prev["gps"] = False
             if sim.running:
                 lineal.stop()
-                sim.running      = False
-                sim.paused       = True
+                sim.running = False
+                sim.paused = True
                 sim.motivo_pausa = "gps_fail"
             sim.log.append({
                 "t": lineal._tiempo_formateado(), "tipo": "CRIT",
@@ -144,7 +139,7 @@ def _avanzar_simulacion(sim: SimState) -> None:
                     "msg": "Reanudación automática tras recuperar GPS",
                 })
 
-    # ── Avance de simulación ──────────────────────────────────────────────────
+    # Avance de simulación
     if sim.running and not sim.finished:
         segundos_simulacion = ui.get("k_simspd", 60)
         lineal.avanza(segundos_simulacion)
@@ -161,16 +156,15 @@ def _avanzar_simulacion(sim: SimState) -> None:
         sim.vel_real = (lineal.posicion_norte - sim.pos_prev) / (segundos_simulacion / 60.0)
         sim.pos_prev = lineal.posicion_norte
 
-        # Construir fila CSV.
-        # lat_e7, lon_e7, EΔd_mm y EΔrumbo_deg se inicializan siempre a None
-        # para garantizar que la cabecera sea idéntica en todas las ejecuciones.
+        # Construir fila CSV
         fila = {
-            "tiempo_s":       lineal.tiempo_total_segundos,
-            "tiempo":         lineal._tiempo_formateado(),
+            "tiempo_s": lineal.tiempo_total_segundos,
+            "tiempo": lineal._tiempo_formateado(),
             "posicion_norte": round(lineal.posicion_norte, 3),
-            "slow_cart":      lineal.slow_down_cart,
+            "slow_cart": lineal.slow_down_cart,
             "slow_end_tower": lineal.slow_down_end_tower,
         }
+
         longitud_tramo_nominal = lineal.longitud_tramo
         for j, torre in enumerate(lineal.torres):
             fila[f"torre_{j}_x"] = round(torre.posicion_x, 4)
@@ -181,29 +175,28 @@ def _avanzar_simulacion(sim: SimState) -> None:
                 delta_y = tramo.desviacion_norte
                 longitud_calculada = round((delta_x**2 + delta_y**2) ** 0.5, 4)
                 fila[f"tramo_{j+1}_L_calculado"] = longitud_calculada
-                fila[f"tramo_{j+1}_deform_m"]    = round(longitud_tramo_nominal - longitud_calculada, 4)
-                fila[f"tramo_{j+1}_desv_y"]      = round(delta_y, 4)
-                fila[f"tramo_{j+1}_rumbo_deg"]   = round(tramo.angulo_grados, 4)
+                fila[f"tramo_{j+1}_deform_m"] = round(longitud_tramo_nominal - longitud_calculada, 4)
+                fila[f"tramo_{j+1}_desv_y"] = round(delta_y, 4)
+                fila[f"tramo_{j+1}_rumbo_deg"] = round(tramo.angulo_grados, 4)
         fila["lat_e7"] = lineal.gps.lat_e7 if lineal.gps else None
         fila["lon_e7"] = lineal.gps.lon_e7 if lineal.gps else None
 
-        # Errores de trayectoria en la fila CSV (usa puntos_tray ya calculado)
-        fila["EΔd_mm"]      = None
+        # Errores de trayectoria en la fila CSV
+        fila["EΔd_mm"] = None
         fila["EΔrumbo_deg"] = None
         if sim.trayectoria_activa and puntos_tray:
             torre_gps, idx_gps = None, -1
             if lineal.gps:
                 torre_gps = lineal.gps.torre
-                idx_gps   = lineal.torres.index(torre_gps)
+                idx_gps = lineal.torres.index(torre_gps)
             elif lineal.caja_interfaz:
                 torre_gps = lineal.caja_interfaz.torre
-                idx_gps   = lineal.torres.index(torre_gps)
+                idx_gps = lineal.torres.index(torre_gps)
             if torre_gps is not None:
                 hist_torre = (sim.tower_trails[idx_gps]
                               if sim.tower_trails and idx_gps < len(sim.tower_trails) else [])
-                ed, er = calcular_errores(torre_gps.posicion_x, torre_gps.posicion_y,
-                                          puntos_tray, hist_torre, lineal.en_marcha_atras)
-                fila["EΔd_mm"]      = round(ed, 1) if ed is not None else None
+                ed, er = calcular_errores(torre_gps.posicion_x, torre_gps.posicion_y, puntos_tray, hist_torre, lineal.en_marcha_atras)
+                fila["EΔd_mm"] = round(ed, 1) if ed is not None else None
                 fila["EΔrumbo_deg"] = round(er, 2) if er is not None else None
 
         # Escribe la fila directamente a disco para no acumular datos en memoria.
@@ -227,15 +220,15 @@ def _avanzar_simulacion(sim: SimState) -> None:
             for j, (ep, ea) in enumerate(zip(sim.tramos_ok_prev, tramos_ok)):
                 if ep and not ea:
                     sim.log.append({
-                        "t":    lineal._tiempo_formateado(),
+                        "t": lineal._tiempo_formateado(),
                         "tipo": "CRIT",
-                        "msg":  f"Tramo {j+1} desalineado  ({lineal.tramos[j].desviacion_norte:+.3f} m)",
+                        "msg": f"Tramo {j+1} desalineado  ({lineal.tramos[j].desviacion_norte:+.3f} m)",
                     })
                 elif not ep and ea:
                     sim.log.append({
-                        "t":    lineal._tiempo_formateado(),
+                        "t": lineal._tiempo_formateado(),
                         "tipo": "OK",
-                        "msg":  f"Tramo {j+1} recuperado",
+                        "msg": f"Tramo {j+1} recuperado",
                     })
         sim.tramos_ok_prev = tramos_ok
 
@@ -250,7 +243,7 @@ def _avanzar_simulacion(sim: SimState) -> None:
                 lineal.invertir_direccion()
                 sim.ar_pasadas += 1
                 sim.log.append({
-                    "t":    lineal._tiempo_formateado(),
+                    "t": lineal._tiempo_formateado(),
                     "tipo": "INFO",
                     "msg":  f"Auto-reverse ▼  ({pos:.1f} m ≥ {limite_norte:.0f} m)  "
                             f"— pasada #{sim.ar_pasadas}",
@@ -259,7 +252,7 @@ def _avanzar_simulacion(sim: SimState) -> None:
                 lineal.invertir_direccion()
                 sim.ar_pasadas += 1
                 sim.log.append({
-                    "t":    lineal._tiempo_formateado(),
+                    "t": lineal._tiempo_formateado(),
                     "tipo": "INFO",
                     "msg":  f"Auto-reverse ▲  ({pos:.1f} m ≤ {limite_sur:.0f} m)  "
                             f"— pasada #{sim.ar_pasadas}",
@@ -270,7 +263,7 @@ def _avanzar_simulacion(sim: SimState) -> None:
                 if lineal.gps:
                     lineal.gps.detener_transmision_background()
                 sim.log.append({
-                    "t":    lineal._tiempo_formateado(),
+                    "t": lineal._tiempo_formateado(),
                     "tipo": "FIN",
                     "msg":  f"Riego completado — {lineal.posicion_norte:.2f} m en {lineal._tiempo_formateado()}",
                 })
@@ -279,8 +272,7 @@ def _avanzar_simulacion(sim: SimState) -> None:
                 st.rerun()
                 return
 
-    # ── Errores de trayectoria: en cada refresco aunque esté pausado ──────────
-    # Solo el operador llama esta función → solo él escribe en sim.trayectoria_ead_mm
+    # Errores de trayectoria: en cada refresco aunque esté pausado
     if sim.trayectoria_activa and puntos_tray:
         torre_gps, idx_gps = None, -1
         if lineal.gps:
@@ -314,7 +306,7 @@ def panel_principal():
         _avanzar_simulacion(sim)
         lineal = sim.lineal  # refresca ref tras el avance
 
-    # ── CABECERA ──────────────────────────────────────────────────────────────
+    # CABECERA
     st.markdown("# Gemelo Digital Lineal")
 
     # Badge de modo observador
@@ -395,41 +387,38 @@ def panel_principal():
             unsafe_allow_html=True,
         )
 
-    # ── MÉTRICAS PRINCIPALES ──────────────────────────────────────────────────
+    # MÉTRICAS PRINCIPALES
     columnas_metricas = st.columns(10)
     if lineal:
-        porcentaje        = min(lineal.posicion_norte / longitud_campo * 100.0, 100.0)
+        porcentaje = min(lineal.posicion_norte / longitud_campo * 100.0, 100.0)
         velocidad_teorica = lineal.velocidad_nominal * lineal.velocidad_porcentaje / 100.0
-        velocidad_real    = sim.vel_real
+        velocidad_real = sim.vel_real
         diferencia_velocidad = velocidad_real - velocidad_teorica
-        columnas_metricas[0].metric("Tiempo campo",    lineal._tiempo_formateado())
-        columnas_metricas[1].metric("Ciclo",           str(lineal.ciclo_actual))
-        columnas_metricas[2].metric("Posición media",  f"{lineal.posicion_norte:.2f} m")
-        columnas_metricas[3].metric("Recorrido",       f"{porcentaje:.1f} %")
-        columnas_metricas[4].metric("Alineación",      "OK" if lineal.esta_alineado else "Corrigiendo")
+        
+        columnas_metricas[0].metric("Tiempo campo", lineal._tiempo_formateado())
+        columnas_metricas[1].metric("Ciclo", str(lineal.ciclo_actual))
+        columnas_metricas[2].metric("Posición media", f"{lineal.posicion_norte:.2f} m")
+        columnas_metricas[3].metric("Recorrido", f"{porcentaje:.1f} %")
+        columnas_metricas[4].metric("Alineación", "OK" if lineal.esta_alineado else "Corrigiendo")
+        
         cart_ralentizada = lineal.slow_down_cart
-        end_ralentizada  = lineal.slow_down_end_tower
+        end_ralentizada = lineal.slow_down_end_tower
+        
         estado_cart = ("★ ON" if lineal.guia_izquierda.contactor.esta_cerrado else "★ OFF") if cart_ralentizada else \
                       ("ON"   if lineal.guia_izquierda.contactor.esta_cerrado else "OFF")
         estado_end  = ("★ ON" if lineal.guia_derecha.contactor.esta_cerrado   else "★ OFF") if end_ralentizada else \
                       ("ON"   if lineal.guia_derecha.contactor.esta_cerrado   else "OFF")
-        columnas_metricas[5].metric("Guia Izq (Cart)", estado_cart,
-                                    help="★ = en slow_down, sigue al motor rápido" if cart_ralentizada else None)
-        columnas_metricas[6].metric("End-tower",       estado_end,
-                                    help="★ = en slow_down, sigue al motor rápido" if end_ralentizada else None)
-        columnas_metricas[7].metric("Vel. real",       f"{velocidad_real:.2f} m/min",
-                                    delta=f"{diferencia_velocidad:+.2f} vs teórica",
-                                    delta_color="normal")
-        columnas_metricas[8].metric("Motor ★ activo",  f"{lineal.motor_rapido_pct_on:.0f} %",
-                                    help="% del último ciclo completo (60 s sim.) con el motor rápido encendido")
-        columnas_metricas[9].metric("Dirección",
-                                    "▼ ATRÁS" if lineal.en_marcha_atras else "▲ ADELANTE",
-                                    help="S = alternar marcha atrás / avance normal")
+        
+        columnas_metricas[5].metric("Guia Izq (Cart)", estado_cart, help="★ = en slow_down, sigue al motor rápido" if cart_ralentizada else None)
+        columnas_metricas[6].metric("End-tower", estado_end, help="★ = en slow_down, sigue al motor rápido" if end_ralentizada else None)
+        columnas_metricas[7].metric("Vel. real", f"{velocidad_real:.2f} m/min", delta=f"{diferencia_velocidad:+.2f} vs teórica", delta_color="normal")
+        columnas_metricas[8].metric("Motor ★ activo",  f"{lineal.motor_rapido_pct_on:.0f} %", help="% del último ciclo completo (60 s sim.) con el motor rápido encendido")
+        columnas_metricas[9].metric("Dirección", "▼ ATRÁS" if lineal.en_marcha_atras else "▲ ADELANTE", help="S = alternar marcha atrás / avance normal")
     else:
         for col in columnas_metricas:
             col.metric("—", "—")
 
-    # ── BARRA DE PROGRESO ─────────────────────────────────────────────────────
+    # BARRA DE PROGRESO
     if lineal:
         auto_reverse = sim.sim_auto_reverse
         limite_sur   = sim.sim_ar_ymin
@@ -500,41 +489,39 @@ def panel_principal():
                 unsafe_allow_html=True,
             )
 
-    # ── MÉTRICAS GPS ──────────────────────────────────────────────────────────
+    # MÉTRICAS GPS
     if lineal and lineal.gps:
-        gps              = lineal.gps
+        gps = lineal.gps
         indice_torre_gps = lineal.torres.index(gps.torre)
-        columnas_gps     = st.columns(4)
-        latitud          = gps.lat_e7 / 1e7
-        longitud         = gps.lon_e7 / 1e7
-        gps_anterior     = sim.gps_prev
-        cambio_latitud   = round(latitud  - gps_anterior["lat"], 7) if gps_anterior else None
-        cambio_longitud  = round(longitud - gps_anterior["lon"], 7) if gps_anterior else None
-        columnas_gps[0].metric("GPS · Torre",  f"Intermedia {indice_torre_gps}")
-        columnas_gps[1].metric("Latitud",      f"{latitud:.7f}°",
-                               delta=f"{cambio_latitud:+.7f}°" if cambio_latitud is not None else None)
-        columnas_gps[2].metric("Longitud",     f"{longitud:.7f}°",
-                               delta=f"{cambio_longitud:+.7f}°" if cambio_longitud is not None else None)
+        columnas_gps = st.columns(4)
+        latitud = gps.lat_e7 / 1e7
+        longitud = gps.lon_e7 / 1e7
+        gps_anterior = sim.gps_prev
+        cambio_latitud = round(latitud  - gps_anterior["lat"], 7) if gps_anterior else None
+        cambio_longitud = round(longitud - gps_anterior["lon"], 7) if gps_anterior else None
+        columnas_gps[0].metric("GPS · Torre", f"Intermedia {indice_torre_gps}")
+        columnas_gps[1].metric("Latitud", f"{latitud:.7f}°", delta=f"{cambio_latitud:+.7f}°" if cambio_latitud is not None else None)
+        columnas_gps[2].metric("Longitud", f"{longitud:.7f}°", delta=f"{cambio_longitud:+.7f}°" if cambio_longitud is not None else None)
         columnas_gps[3].metric("Formato ×10⁷", f"{gps.lat_e7}  /  {gps.lon_e7}")
         sim.gps_prev = {"lat": latitud, "lon": longitud}
 
-    # ── CAJA DE INTERFAZ ──────────────────────────────────────────────────────
+    # CAJA DE INTERFAZ 
     if lineal and lineal.caja_interfaz:
-        caja              = lineal.caja_interfaz
+        caja = lineal.caja_interfaz
         indice_torre_caja = lineal.torres.index(caja.torre)
-        color_safety      = "#3fb950" if caja.safety_ok else "#f85149"
-        color_gps         = "#3fb950" if caja.gps_ok    else "#f85149"
-        color_cart        = "#ffa657" if caja.slow_down_cart      else "#484f58"
-        color_end         = "#ffa657" if caja.slow_down_end_tower else "#484f58"
-        columnas_caja     = st.columns(6)
-        columnas_caja[0].metric("Caja · Torre GPS",    f"Intermedia {indice_torre_caja}")
-        columnas_caja[1].metric("GPS enviado",
-                                f"{caja.lat_e7} / {caja.lon_e7}",
-                                help=f"{caja.latitud:.7f}°  {caja.longitud:.7f}°  Carr {caja.carr}")
-        columnas_caja[2].metric("Safety",     "OK" if caja.safety_ok else "FAIL")
-        columnas_caja[3].metric("GPS status", "OK" if caja.gps_ok    else "FAIL")
-        columnas_caja[4].metric("Slow Cart",  "ON" if caja.slow_down_cart      else "—")
-        columnas_caja[5].metric("Slow EndT",  "ON" if caja.slow_down_end_tower else "—")
+        color_safety = "#3fb950" if caja.safety_ok else "#f85149"
+        color_gps = "#3fb950" if caja.gps_ok    else "#f85149"
+        color_cart = "#ffa657" if caja.slow_down_cart else "#484f58"
+        color_end = "#ffa657" if caja.slow_down_end_tower else "#484f58"
+        
+        columnas_caja = st.columns(6)
+        columnas_caja[0].metric("Caja · Torre GPS", f"Intermedia {indice_torre_caja}")
+        columnas_caja[1].metric("GPS enviado", f"{caja.lat_e7} / {caja.lon_e7}", help=f"{caja.latitud:.7f}°  {caja.longitud:.7f}°  Carr {caja.carr}")
+        columnas_caja[2].metric("Safety", "OK" if caja.safety_ok else "FAIL")
+        columnas_caja[3].metric("GPS status", "OK" if caja.gps_ok else "FAIL")
+        columnas_caja[4].metric("Slow Cart", "ON" if caja.slow_down_cart else "—")
+        columnas_caja[5].metric("Slow EndT", "ON" if caja.slow_down_end_tower else "—")
+        
         st.markdown(
             f"<div style='display:flex;gap:12px;margin:-12px 0 8px 0;flex-wrap:wrap;align-items:center'>"
             f"<span style='font-size:0.92rem;font-weight:700;color:{color_safety};font-family:monospace'>"
@@ -551,8 +538,7 @@ def panel_principal():
             unsafe_allow_html=True,
         )
 
-    # ── FIGURA: vista general · Δd · Δrumbo · CSV · Log · GPS track ──────────
-    # _tray_on: True si el operador tiene trayectoria activa (para ambas sesiones)
+    # Errores de trayectoria y log solo si la trayectoria está activa
     _tray_on = sim.trayectoria_activa or st.session_state.get("k_tray_activa", False)
 
     if _tray_on:
@@ -600,7 +586,6 @@ def panel_principal():
         with col_csv:
             tiene_datos = sim.csv_ruta and sim.csv_filas_escritas > 0
             if tiene_datos and not sim.running:
-                # Parado o pausado: el fichero ya no cambia → hash estable → sin errores.
                 with open(sim.csv_ruta, "rb") as _f:
                     csv_bytes = _f.read()
                 st.download_button(
@@ -643,8 +628,8 @@ def panel_principal():
     posicion_norte = lineal.posicion_norte if lineal is not None else 0.0
 
     # Trayectoria para la figura:
-    #   · Operador: recalcula desde sus widgets (inmediato, sin delay)
-    #   · Observador: usa la copia publicada en el singleton por el operador
+    # - Operador: recalcula desde sus widgets (inmediato, sin delay)
+    # - Observador: usa la copia publicada en el singleton por el operador
     if st.session_state.get("k_tray_activa", False) and lineal is not None:
         lat_fig, lon_fig = get_origen_latlon()
         puntos_fig       = parse_trayectoria(st.session_state.get("k_tray_input", ""), lat_fig, lon_fig)

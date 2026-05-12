@@ -1,8 +1,7 @@
-import math
-import os
+import math, os
 from datetime import datetime
 import streamlit as st
-from modelo import Lineal
+from modelos import Lineal
 from logica.constantes import TERRENOS, get_defaults
 from logica.estado import get_sim, SIM_KEYS
 from logica.trayectoria import get_origen_latlon, parse_trayectoria
@@ -16,7 +15,7 @@ try:
 except ImportError:
     _SERIAL_DISPONIBLE = False
 
-SIN_PUERTO      = "— Sin puerto (solo consola) —"
+SIN_PUERTO = "— Sin puerto (solo consola) —"
 SIN_CAJA_PUERTO = "— Selecciona puerto —"
 
 
@@ -42,10 +41,10 @@ def _renderizar_sidebar_observador(sim):
 
     st.markdown("##### Configuración activa")
     c1, c2 = st.columns(2)
-    c1.metric("N° tramos",    lineal.numero_tramos)
-    c2.metric("Long. tramo",  f"{lineal.longitud_tramo} m")
+    c1.metric("N° tramos", lineal.numero_tramos)
+    c2.metric("Long. tramo", f"{lineal.longitud_tramo} m")
     c1.metric("Vel. nominal", f"{lineal.velocidad_nominal} m/min")
-    c2.metric("Campo total",  f"{sim.longitud_campo} m")
+    c2.metric("Campo total", f"{sim.longitud_campo} m")
 
     velocidad_media = lineal.velocidad_nominal * lineal.velocidad_porcentaje / 100.0
     st.markdown(
@@ -105,7 +104,7 @@ def _renderizar_sidebar_observador(sim):
     for tecla, descripcion in [
         ("< (mantener)", "Ralentiza Cart"),
         ("- (mantener)", "Ralentiza End-tower"),
-        ("R (pulsar)",   "Marcha atrás / avance normal"),
+        ("R (pulsar)", "Marcha atrás / avance normal"),
     ]:
         st.markdown(
             f"<code style='background:#161b22;border:1px solid #30363d;border-radius:4px;"
@@ -117,16 +116,17 @@ def _renderizar_sidebar_observador(sim):
 
 
 def _iniciar_simulacion(numero_tramos, longitud_tramo, porcentaje_velocidad, velocidad_nominal, longitud_campo):
-    sim   = get_sim()
+    sim = get_sim()
     state = st.session_state
     ruido_terreno = TERRENOS.get(state.get("k_terreno", "Normal"), 0.012)
     sim.lineal = Lineal(
-        numero_tramos        = numero_tramos,
-        longitud_tramo       = longitud_tramo,
+        numero_tramos = numero_tramos,
+        longitud_tramo = longitud_tramo,
         velocidad_porcentaje = porcentaje_velocidad,
-        velocidad_nominal    = velocidad_nominal,
-        ruido_lateral        = ruido_terreno,
+        velocidad_nominal = velocidad_nominal,
+        ruido_lateral = ruido_terreno,
     )
+
     sim.lineal.start()
     sim.log.append({"t": "00h 00m 00s", "tipo": "START", "msg": "Sistema iniciado"})
 
@@ -147,27 +147,27 @@ def _iniciar_simulacion(numero_tramos, longitud_tramo, porcentaje_velocidad, vel
         puerto_caja = state.get("k_caja_puerto", "")
         if puerto_caja and puerto_caja != SIN_CAJA_PUERTO:
             sim.lineal.asignar_caja(
-                indice_torre  = state.get("k_caja_torre", 1),
-                lat_origen    = state.get("k_caja_lat_e7", 404168000) / 1e7,
-                lon_origen    = state.get("k_caja_lon_e7", -37038000) / 1e7,
+                indice_torre = state.get("k_caja_torre", 1),
+                lat_origen = state.get("k_caja_lat_e7", 404168000) / 1e7,
+                lon_origen = state.get("k_caja_lon_e7", -37038000) / 1e7,
                 puerto_serial = puerto_caja,
-                carr          = state.get("k_caja_carr", 2),
+                carr = state.get("k_caja_carr", 2),
             )
             sim.lineal.caja_interfaz.iniciar()
 
-    sim.longitud_campo  = longitud_campo
-    sim.running         = True
-    sim.finished        = False
-    sim.paused          = False
-    sim.caja_slow_prev  = {"cart": False, "end": False, "safety": True}
-    sim.tower_trails    = [[] for _ in range(len(sim.lineal.torres))]
+    sim.longitud_campo = longitud_campo
+    sim.running = True
+    sim.finished = False
+    sim.paused = False
+    sim.caja_slow_prev = {"cart": False, "end": False, "safety": True}
+    sim.tower_trails = [[] for _ in range(len(sim.lineal.torres))]
 
     # Crear fichero CSV en disco donde se escribirá cada fila sin límite de tamaño.
     # Se usa append-mode tick a tick para no acumular datos en memoria.
     os.makedirs(_DIR_EXPORTS, exist_ok=True)
-    marca_tiempo            = datetime.now().strftime("%Y%m%d_%H%M%S")
-    sim.csv_ruta            = os.path.join(_DIR_EXPORTS, f"simulacion_{marca_tiempo}.csv")
-    sim.csv_filas_escritas  = 0
+    marca_tiempo = datetime.now().strftime("%Y%m%d_%H%M%S")
+    sim.csv_ruta = os.path.join(_DIR_EXPORTS, f"simulacion_{marca_tiempo}.csv")
+    sim.csv_filas_escritas = 0
 
     # Marcar esta sesión como operador
     st.session_state["_is_operator"] = True
@@ -185,7 +185,7 @@ def _limpiar_y_resetear():
         sim[clave] = fresh[clave]
     # Resetear estado per-sesión relevante
     st.session_state["marcha_atras_kbd"] = False
-    st.session_state["_is_operator"]     = False
+    st.session_state["_is_operator"] = False
 
 
 def renderizar_sidebar():
@@ -194,8 +194,8 @@ def renderizar_sidebar():
         st.caption("Configura tu Gemelo Digital")
         st.divider()
 
-        sim    = get_sim()
-        state  = st.session_state
+        sim = get_sim()
+        state = st.session_state
         locked = sim.lineal is not None
 
         # Sesión no-operador con simulación ya activa → solo lectura
@@ -212,12 +212,12 @@ def renderizar_sidebar():
             )
 
         c1, c2 = st.columns(2)
-        numero_tramos  = c1.number_input("N° de tramos", 3, 20, 5, 1, disabled=locked, key="k_tramos")
+        numero_tramos = c1.number_input("N° de tramos", 3, 20, 5, 1, disabled=locked, key="k_tramos")
         longitud_tramo = c2.number_input("Long. tramo (m)", 5, 500, 50, 5, disabled=locked, key="k_tlen")
 
         c3, c4 = st.columns(2)
         velocidad_nominal = c3.number_input("Vel. nominal (m/min)", 0.5, 10.0, 3.0, 0.5, disabled=locked, key="k_vnom")
-        longitud_campo    = c4.number_input("Campo total (m)",      100, 5000, 800, 50,  disabled=locked, key="k_campo")
+        longitud_campo = c4.number_input("Campo total (m)", 100, 5000, 800, 50,  disabled=locked, key="k_campo")
 
         st.markdown("##### Panel speed")
         porcentaje_velocidad = st.slider(
@@ -299,8 +299,8 @@ def renderizar_sidebar():
             options=["ninguno", "gps", "caja"],
             format_func=lambda k: {
                 "ninguno": "Sin conexión",
-                "gps":     "GPS directo  (cable cruzado, 9 600 baud)",
-                "caja":    "Caja de interfaz Arduino  (115 200 baud)",
+                "gps": "GPS directo  (cable cruzado, 9 600 baud)",
+                "caja": "Caja de interfaz Arduino  (115 200 baud)",
             }[k],
             key="k_conexion_modo",
             disabled=locked,
@@ -329,9 +329,7 @@ def renderizar_sidebar():
             st.markdown('<p style="font-size:0.875rem;margin:0 0 4px 0">Puerto serie</p>', unsafe_allow_html=True)
             c_puerto, c_refresh = st.columns([6, 1])
             with c_puerto:
-                st.selectbox("Puerto serie",
-                             options=[SIN_PUERTO] + puertos_serie,
-                             key="k_gps_puerto", disabled=locked, label_visibility="collapsed")
+                st.selectbox("Puerto serie", options=[SIN_PUERTO] + puertos_serie, key="k_gps_puerto", disabled=locked, label_visibility="collapsed")
             with c_refresh:
                 if st.button("↺", help="Actualizar puertos", disabled=locked, width="stretch"):
                     st.rerun()
@@ -344,8 +342,8 @@ def renderizar_sidebar():
 
             _lat_e7_orig = state.get("k_caja_lat_e7", 404168000)
             _lon_e7_orig = state.get("k_caja_lon_e7", -37038000)
-            _ltram       = state.get("k_tlen", 50)
-            _mpg_lon     = 111320.0 * math.cos(math.radians(_lat_e7_orig / 1e7))
+            _ltram = state.get("k_tlen", 50)
+            _mpg_lon = 111320.0 * math.cos(math.radians(_lat_e7_orig / 1e7))
 
             def _label_torre_caja(i):
                 lon_i = round((_lon_e7_orig / 1e7 + _ltram * i / _mpg_lon) * 1e7)
@@ -464,9 +462,6 @@ def renderizar_sidebar():
             else:
                 st.caption("Sin puntos — pulsa ＋ para añadir")
 
-        # Solo el operador publica la trayectoria en el singleton.
-        # El observador no tiene k_tray_activa ni k_tray_input; si ejecutara este
-        # bloque sin guarda, machacaría lo que publicó el operador con None.
         if st.session_state.get("_is_operator", False):
             if state.get("k_tray_activa", False):
                 lat_p, lon_p = get_origen_latlon()
@@ -500,20 +495,19 @@ def renderizar_sidebar():
                     "tipo": "STOP",
                     "msg":  f"Sistema pausado en {sim.lineal.posicion_norte:.2f} m",
                 })
-                sim.running      = False
-                sim.paused       = True
+                sim.running = False
+                sim.paused = True
                 sim.motivo_pausa = "manual"
                 st.rerun()
 
         elif sim.paused and not sim.finished:
             caja = sim.lineal.caja_interfaz
             safety_en_fallo = caja is not None and not caja.safety_ok
-            gps_en_fallo    = caja is not None and not caja.gps_ok
+            gps_en_fallo = caja is not None and not caja.gps_ok
             continuar_bloqueado = safety_en_fallo or gps_en_fallo
 
             bc1, bc2 = st.columns(2)
-            if bc1.button("CONTINUAR", key="btn_start", type="primary",
-                          width="stretch", disabled=continuar_bloqueado):
+            if bc1.button("CONTINUAR", key="btn_start", type="primary", width="stretch", disabled=continuar_bloqueado):
                 sim.lineal.start()
                 if sim.lineal.gps:
                     sim.lineal.gps.iniciar_transmision_background()
@@ -524,8 +518,8 @@ def renderizar_sidebar():
                     "tipo": "START",
                     "msg":  f"Sistema reanudado desde {sim.lineal.posicion_norte:.2f} m",
                 })
-                sim.running      = True
-                sim.paused       = False
+                sim.running = True
+                sim.paused = False
                 sim.motivo_pausa = None
                 st.rerun()
             if bc2.button("RESET", key="btn_reset", width="stretch"):
