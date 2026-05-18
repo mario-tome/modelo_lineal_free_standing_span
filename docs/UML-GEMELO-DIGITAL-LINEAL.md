@@ -1,6 +1,10 @@
 classDiagram
 direction TB
 
+    %% ─────────────────────────────────────────────────────────────────────
+    %% módulo: modelos/componentes.py
+    %% ─────────────────────────────────────────────────────────────────────
+
     class METROS_POR_GRADO_LAT {
         <<constante módulo>>
         +valor: float = 111320.0
@@ -9,6 +13,11 @@ direction TB
     class avanzar_en_circunferencia {
         <<function>>
         +avanzar_en_circunferencia(centro_x, centro_y, radio, inicio_x, inicio_y, distancia) tuple
+    }
+
+    class _aplicar_interferencia_gps {
+        <<function privada>>
+        +_aplicar_interferencia_gps(lat_e7: int, lon_e7: int, interferencia_mm: float, lat_origen: float) tuple
     }
 
     class Contactor {
@@ -74,6 +83,7 @@ direction TB
 	    +puerto_serial: str | None
 	    +baudrate: int
 	    +verbose_consola: bool
+	    +interferencia_gps_mm: float
 	    -_conexion
 	    -_hilo
 	    -_activo: bool
@@ -81,6 +91,7 @@ direction TB
 	    +longitud: float «prop»
 	    +lat_e7: int «prop»
 	    +lon_e7: int «prop»
+	    +__init__(torre, lat_origen, lon_origen, puerto_serial: str = None, baudrate: int = 9600, verbose_consola: bool = False)
 	    +iniciar_transmision_background()
 	    +detener_transmision_background()
 	    -_bucle_transmision()
@@ -98,17 +109,23 @@ direction TB
 	    +safety_ok: bool
 	    +gps_ok: bool
 	    +ultimo_mensaje: str
+	    +interferencia_gps_mm: float
 	    -_activo: bool
 	    -_hilo
 	    +latitud: float «prop»
 	    +longitud: float «prop»
 	    +lat_e7: int «prop»
 	    +lon_e7: int «prop»
+	    +__init__(torre, lat_origen, lon_origen, puerto_serial: str, carr: int = 2)
 	    +iniciar()
 	    +detener()
 	    -_bucle()
 	    -_procesar(msg: str)
     }
+
+    %% ─────────────────────────────────────────────────────────────────────
+    %% módulo: modelos/lineal.py
+    %% ─────────────────────────────────────────────────────────────────────
 
     class Lineal {
 	    «class» DURACION_CICLO: int = 60
@@ -139,8 +156,8 @@ direction TB
 	    +en_marcha_atras: bool «prop»
 	    +rumbo: float «prop»
 	    +__init__(numero_tramos: int = 5, longitud_tramo: float = 50.0, velocidad_porcentaje: float = 50.0, velocidad_nominal: float = 3.0, ruido_lateral: float = 0.0)
-	    +asignar_gps(indice_torre, lat_origen, lon_origen, puerto_serial, baudrate, verbose_consola)
-	    +asignar_caja(indice_torre, lat_origen, lon_origen, puerto_serial, carr)
+	    +asignar_gps(indice_torre: int, lat_origen: float, lon_origen: float, puerto_serial: str = None, baudrate: int = 9600, verbose_consola: bool = False)
+	    +asignar_caja(indice_torre: int, lat_origen: float, lon_origen: float, puerto_serial: str, carr: int = 2)
 	    +start()
 	    +stop()
 	    +invertir_direccion()
@@ -149,6 +166,26 @@ direction TB
 	    -_actualizar_fss()
 	    -_tiempo_formateado() str
     }
+
+    %% ─────────────────────────────────────────────────────────────────────
+    %% módulo: modelos/pivot.py  (stub — en desarrollo)
+    %% ─────────────────────────────────────────────────────────────────────
+
+    class Pivot {
+        <<en desarrollo>>
+    }
+
+    %% ─────────────────────────────────────────────────────────────────────
+    %% módulo: modelos/corner.py  (stub — en desarrollo)
+    %% ─────────────────────────────────────────────────────────────────────
+
+    class Corner {
+        <<en desarrollo>>
+    }
+
+    %% ─────────────────────────────────────────────────────────────────────
+    %% Relaciones
+    %% ─────────────────────────────────────────────────────────────────────
 
     Torre <|-- Torre_Guia : hereda
     Torre <|-- Torre_Intermedia : hereda
@@ -159,10 +196,17 @@ direction TB
     GPS --> Torre_Intermedia : referencia
     CajaInterfaz --> Torre_Intermedia : referencia
     Torre_Intermedia --> avanzar_en_circunferencia : usa
+    GPS --> _aplicar_interferencia_gps : usa
+    CajaInterfaz --> _aplicar_interferencia_gps : usa
+    _aplicar_interferencia_gps --> METROS_POR_GRADO_LAT : usa
+    GPS --> METROS_POR_GRADO_LAT : usa
+    CajaInterfaz --> METROS_POR_GRADO_LAT : usa
     Lineal *-- Torre : compone
     Lineal *-- Tramo : compone
     Lineal o-- GPS : agregación
     Lineal o-- CajaInterfaz : agregación
     Lineal --> Torre_Guia : usa
-    GPS --> METROS_POR_GRADO_LAT : usa
-    CajaInterfaz --> METROS_POR_GRADO_LAT : usa
+    Pivot --> Torre_Guia : usará
+    Pivot --> Torre_Intermedia : usará
+    Corner --> Torre_Guia : usará
+    Corner --> Torre_Intermedia : usará
