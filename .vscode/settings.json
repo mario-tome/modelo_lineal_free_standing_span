@@ -1,3 +1,7 @@
 {
+    "python.defaultInterpreterPath": "C:\\Python312\\python.exe",
+    "python.analysis.extraPaths": [
+        "C:\\Users\\mario\\Desktop\\pivot_lineal"
+    ],
     "python-envs.defaultEnvManager": "ms-python.python:system"
 }
