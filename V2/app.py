@@ -18,7 +18,6 @@ st.set_page_config(
 
 st.markdown(CSS, unsafe_allow_html=True)
 
-# Garantiza que el estado de simulación compartido tiene todas las claves inicializadas.
 _sim = get_sim()
 _defaults = get_defaults()
 for _k in CLAVES_SIMULACION:

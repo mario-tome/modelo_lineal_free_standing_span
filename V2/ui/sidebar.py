@@ -3,7 +3,7 @@ from datetime import datetime
 import streamlit as st
 from V2.modelos import Lineal
 from V2.logica.constantes import TERRENOS, get_defaults
-from V2.logica.estado import get_sim, CLAVES_SIMULACION
+from V2.logica.estado import get_sim, SimState, CLAVES_SIMULACION
 from V2.logica.trayectoria import get_origen_latlon, parse_trayectoria
 
 _DIR_EXPORTS = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "exports")
@@ -22,7 +22,7 @@ SIN_CAJA_PUERTO = "— Selecciona puerto —"
 # Sidebar para el modo observador (solo lectura)
 # ---------------------------------------------------------------------------
 
-def _renderizar_sidebar_observador(sim) -> None:
+def _renderizar_sidebar_observador(sim: SimState) -> None:
     st.markdown(
         "<div style='display:inline-flex;align-items:center;gap:8px;"
         "background:rgba(88,166,255,0.08);border:1px solid rgba(88,166,255,0.25);"
@@ -217,7 +217,7 @@ def _renderizar_seccion_conexion_gps(numero_tramos: int, bloqueado: bool, puerto
 
 def _renderizar_seccion_conexion_caja(numero_tramos: int, bloqueado: bool, puertos: list) -> None:
     state = st.session_state
-    state["k_caja_carr"] = 2
+    state["k_caja_carr"] = 2  # Carr=2 significa RTK FIX; la caja Arduino solo acepta este modo de posicionamiento
 
     col_lat, col_lon = st.columns(2)
     col_lat.number_input("Lat. origen (×10⁷)", value=404168000, step=1, key="k_caja_lat_e7", disabled=bloqueado)
@@ -252,7 +252,7 @@ def _renderizar_seccion_conexion_caja(numero_tramos: int, bloqueado: bool, puert
     st.caption("Arduino conectado por USB · Carr=2 (RTK FIX) fijo")
 
 
-def _renderizar_seccion_trayectoria(sim, bloqueado: bool) -> None:
+def _renderizar_seccion_trayectoria(bloqueado: bool) -> None:
     state = st.session_state
 
     if not state.get("k_tray_activa", False):
@@ -313,16 +313,6 @@ def _renderizar_seccion_trayectoria(sim, bloqueado: bool) -> None:
     else:
         st.caption("Sin puntos — pulsa ＋ para añadir")
 
-    if state.get("es_operador", False):
-        if len(pts_sb) >= 2:
-            sim.trayectoria_activa = True
-            sim.trayectoria_puntos = pts_sb
-        else:
-            sim.trayectoria_activa = False
-            sim.trayectoria_puntos = None
-    else:
-        sim.trayectoria_activa = False
-        sim.trayectoria_puntos = None
 
 
 # ---------------------------------------------------------------------------
@@ -480,7 +470,7 @@ def renderizar_sidebar():
         st.markdown("##### Trayectoria objetivo GPS")
         st.toggle("Activar trayectoria", key="k_tray_activa",
                   help="Define puntos de guiado para la sección GPS. Se calcula error de distancia y rumbo.")
-        _renderizar_seccion_trayectoria(sim, bloqueado)
+        _renderizar_seccion_trayectoria(bloqueado)
 
         st.divider()
 

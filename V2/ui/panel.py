@@ -1,6 +1,6 @@
 import csv, math, os
 import streamlit as st
-from V2.modelos import Lineal
+from V2.modelos import Lineal, TramoFinal, TramoIntermedio
 from V2.logica.constantes import TERRENOS
 from V2.logica.estado import get_sim, SimState
 from V2.logica.trayectoria import get_origen_latlon, parse_trayectoria, calcular_errores
@@ -18,7 +18,6 @@ def _sincronizar_configuracion(sim: SimState, lineal: Lineal) -> list:
     """
     ui = st.session_state
 
-    # Trayectoria GPS objetivo
     puntos_tray = []
     if ui.get("k_tray_activa", False):
         lat, lon = get_origen_latlon()
@@ -34,7 +33,6 @@ def _sincronizar_configuracion(sim: SimState, lineal: Lineal) -> list:
         sim.trayectoria_activa = False
         sim.trayectoria_puntos = None
 
-    # Velocidad, terreno e interferencia GPS
     lineal.set_speed(ui.get("k_vpct", 50))
     nivel_patinaje = TERRENOS.get(ui.get("k_terreno", "Normal"), 0.012)
     lineal.tramo_cart.ruido_lateral = nivel_patinaje
@@ -46,7 +44,6 @@ def _sincronizar_configuracion(sim: SimState, lineal: Lineal) -> list:
     elif lineal.caja_interfaz:
         lineal.caja_interfaz.interferencia_gps_mm = interferencia_mm
 
-    # Auto-reverse
     sim.auto_reverse_activo = bool(ui.get("k_auto_reverse", False))
     sim.limite_sur           = float(ui.get("k_ar_ymin", 0))
     sim.limite_norte         = float(ui.get("k_ar_ymax", sim.longitud_campo))
@@ -86,7 +83,6 @@ def _procesar_mensajes_caja(sim: SimState, lineal: Lineal) -> None:
         lineal.slow_down_cart      = caja.slow_down_cart
         lineal.slow_down_end_tower = caja.slow_down_end_tower
 
-    # Safety fail → parada de emergencia
     if not caja.safety_ok and previo.get("safety", True):
         previo["safety"] = False
         lineal.stop()
@@ -155,7 +151,6 @@ def _avanzar_tick(sim: SimState, lineal: Lineal, segundos: int, puntos_tray: lis
     """
     lineal.avanza(segundos)
 
-    # Rastros de posición por sección (muestra el camino recorrido en el campo)
     if sim.rastros_secciones and len(sim.rastros_secciones) == len(lineal.secciones):
         for idx, sec in enumerate(lineal.secciones):
             rastro = sim.rastros_secciones[idx]
@@ -165,17 +160,14 @@ def _avanzar_tick(sim: SimState, lineal: Lineal, segundos: int, puntos_tray: lis
         if len(sim.rastros_secciones[0]) > 20_000:
             sim.rastros_secciones = [r[-20_000:] for r in sim.rastros_secciones]
 
-    # Velocidad real (metros por minuto)
     sim.velocidad_real         = (lineal.posicion_norte - sim.posicion_norte_previa) / (segundos / 60.0)
     sim.posicion_norte_previa  = lineal.posicion_norte
 
     # Errores de trayectoria (antes de escribir CSV para que la fila tenga los valores actualizados)
     _actualizar_errores_trayectoria(sim, lineal, puntos_tray)
 
-    # Exportación CSV
-    _escribir_fila_csv(sim, _construir_fila_csv(lineal, sim))
+    _escribir_fila_csv(sim, _construir_fila_csv(sim, lineal))
 
-    # Historial GPS (últimas 20 lecturas)
     if lineal.gps:
         sim.historial_gps.append({
             "Tiempo":    lineal._tiempo_formateado(),
@@ -255,7 +247,7 @@ def _avanzar_simulacion(sim: SimState) -> None:
 # Helpers de CSV
 # ---------------------------------------------------------------------------
 
-def _construir_fila_csv(lineal: Lineal, sim: SimState) -> dict:
+def _construir_fila_csv(sim: SimState, lineal: Lineal) -> dict:
     """Construye la fila de datos del tick actual para exportar al CSV."""
     fila = {
         "tiempo_s":       lineal.tiempo_total_segundos,
@@ -299,7 +291,7 @@ def _escribir_fila_csv(sim: SimState, fila: dict) -> None:
 # Helper GPS
 # ---------------------------------------------------------------------------
 
-def _get_tramo_gps(lineal: Lineal) -> tuple:
+def _get_tramo_gps(lineal: Lineal) -> tuple[TramoFinal | TramoIntermedio | None, int]:
     """Devuelve (tramo_gps, indice_en_secciones) o (None, -1) si no hay GPS configurado."""
     sensor = lineal.gps or lineal.caja_interfaz
     if sensor is None:
