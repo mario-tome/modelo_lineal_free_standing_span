@@ -58,26 +58,26 @@ def manejar_teclado():
 
     estado_teclado = _giro_kbd(default=None)
 
-    if not st.session_state.get("_is_operator", False):
+    if not st.session_state.get("es_operador", False):
         return
 
     if not isinstance(estado_teclado, dict):
         return
 
-    kbd_reverse_ahora  = estado_teclado.get("reverse", False)
-    kbd_reverse_previo = st.session_state.marcha_atras_kbd
-    if kbd_reverse_ahora != kbd_reverse_previo:
-        st.session_state.marcha_atras_kbd = kbd_reverse_ahora
-        if sim.lineal and sim.running:
+    tecla_reversa_ahora  = estado_teclado.get("reverse", False)
+    tecla_reversa_previa = st.session_state.tecla_reversa_activa
+    if tecla_reversa_ahora != tecla_reversa_previa:
+        st.session_state.tecla_reversa_activa = tecla_reversa_ahora
+        if sim.lineal and sim.en_marcha:
             lineal = sim.lineal
             lineal.invertir_direccion()
-            sim.log.append({
+            sim.registro.append({
                 "t":    lineal._tiempo_formateado(),
                 "tipo": "INFO",
                 "msg":  "MARCHA ATRÁS activada" if lineal.en_marcha_atras else "Avance normal activado",
             })
 
-    if sim.lineal and sim.running:
+    if sim.lineal and sim.en_marcha:
         lineal          = sim.lineal
         ralentizar_cart = bool(estado_teclado.get("left",  False))
         ralentizar_end  = bool(estado_teclado.get("right", False))
@@ -91,7 +91,7 @@ def manejar_teclado():
                 mensaje = "Teclado - — End-tower ralentizado, giro gradual hacia derecha"
             else:
                 mensaje = "Teclado liberado — velocidad normal"
-            sim.log.append({
+            sim.registro.append({
                 "t":    lineal._tiempo_formateado(),
                 "tipo": "INFO",
                 "msg":  mensaje,
