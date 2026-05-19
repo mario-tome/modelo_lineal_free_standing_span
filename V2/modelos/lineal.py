@@ -84,7 +84,7 @@ class Lineal:
         self.gps:           ReferenciaGPS | None = None
         self.caja_interfaz: CajaInterfaz  | None = None
 
-        self._angulo_referencia: float = 0.0  # grados, atan2(dy, dx) del eje Cart→End
+        self._angulo_referencia_grados: float = 0.0  # atan2(dy, dx) del eje Cart→End
 
     @property
     def posicion_norte(self) -> float:
@@ -132,21 +132,16 @@ class Lineal:
                     puerto_serial: str = None,
                     baudrate: int = 9600,
                     verbose_consola: bool = False):
-        if not (1 <= indice_seccion <= self.numero_tramos - 1):
-            raise ValueError(f"indice_seccion debe estar entre 1 y {self.numero_tramos - 1}")
-        sec = self.secciones[indice_seccion]
-        if not isinstance(sec, TramoIntermedio):
-            raise ValueError(f"La sección {indice_seccion} no es un TramoIntermedio")
-        self.gps = ReferenciaGPS(sec, lat_origen, lon_origen, puerto_serial, baudrate, verbose_consola)
+        seccion = self._validar_seccion_intermedia(indice_seccion)
+        self.gps = ReferenciaGPS(seccion, lat_origen, lon_origen, puerto_serial, baudrate, verbose_consola)
 
     def asignar_caja(self, indice_seccion: int,
                      lat_origen: float, lon_origen: float,
                      puerto_serial: str,
                      carr: int = 2):
-        if not (1 <= indice_seccion <= self.numero_tramos - 1):
-            raise ValueError(f"indice_seccion debe estar entre 1 y {self.numero_tramos - 1}")
+        seccion = self._validar_seccion_intermedia(indice_seccion)
         self.caja_interfaz = CajaInterfaz(
-            tramo=self.secciones[indice_seccion],
+            tramo=seccion,
             lat_origen=lat_origen,
             lon_origen=lon_origen,
             puerto_serial=puerto_serial,
@@ -169,21 +164,21 @@ class Lineal:
             if not self._en_marcha:
                 continue
 
-            rumbo  = self.rumbo
-            slow_c = self.slow_down_cart
-            slow_e = self.slow_down_end_tower
+            rumbo           = self.rumbo
+            ralentizar_cart = self.slow_down_cart
+            ralentizar_end  = self.slow_down_end_tower
 
             # Actualizar motor de cada guía según su duty cycle
             self.tramo_cart.actualizar_motor(self._segundo_en_ciclo, self.DURACION_CICLO)
             self.tramo_end.actualizar_motor(self._segundo_en_ciclo, self.DURACION_CICLO)
 
             # En slow_down, la guía ralentizada copia el ritmo del motor rápido en vez del duty cycle
-            if slow_c and not slow_e:
+            if ralentizar_cart and not ralentizar_end:
                 self.tramo_cart.motor_activo = self.torre_rapida.motor_activo
                 self.tramo_cart.avanzar(1, self.direccion, rumbo)
                 self.tramo_end.avanzar(1, self.direccion, rumbo)
 
-            elif slow_e and not slow_c:
+            elif ralentizar_end and not ralentizar_cart:
                 self.tramo_end.motor_activo = self.torre_rapida.motor_activo
                 self.tramo_end.avanzar(1, self.direccion, rumbo)
                 self.tramo_cart.avanzar(1, self.direccion, rumbo)
@@ -192,34 +187,34 @@ class Lineal:
                 self.tramo_cart.avanzar(1, self.direccion, rumbo)
                 self.tramo_end.avanzar(1, self.direccion, rumbo)
 
-            x_cart = self.tramo_cart.posicion_x
-            y_cart = self.tramo_cart.posicion_y
-            x_end  = self.tramo_end.posicion_x
-            y_end  = self.tramo_end.posicion_y
-            N = len(self.secciones) - 1  # número de intervalos
+            x_cart            = self.tramo_cart.posicion_x
+            y_cart            = self.tramo_cart.posicion_y
+            x_end             = self.tramo_end.posicion_x
+            y_end             = self.tramo_end.posicion_y
+            numero_intervalos = len(self.secciones) - 1
 
             # Cascada izquierda: cada sección sigue a la anterior (Cart → FSS izq)
             for i in range(1, self.indice_fss_izq + 1):
-                pivot = self.secciones[i - 1]
-                x_obj = x_cart + (x_end - x_cart) * i / N
-                y_obj = y_cart + (y_end - y_cart) * i / N
+                pivote = self.secciones[i - 1]
+                x_obj  = x_cart + (x_end - x_cart) * i / numero_intervalos
+                y_obj  = y_cart + (y_end - y_cart) * i / numero_intervalos
                 self.secciones[i].seguir(
                     x_obj, y_obj, 1, self.direccion,
-                    pivot.posicion_x, pivot.posicion_y, rumbo,
+                    pivote.posicion_x, pivote.posicion_y, rumbo,
                 )
 
             # Cascada derecha: cada sección sigue a la siguiente (End-tower → FSS der)
-            for i in range(N - 1, self.indice_fss_der - 1, -1):
-                pivot = self.secciones[i + 1]
-                x_obj = x_cart + (x_end - x_cart) * i / N
-                y_obj = y_cart + (y_end - y_cart) * i / N
+            for i in range(numero_intervalos - 1, self.indice_fss_der - 1, -1):
+                pivote = self.secciones[i + 1]
+                x_obj  = x_cart + (x_end - x_cart) * i / numero_intervalos
+                y_obj  = y_cart + (y_end - y_cart) * i / numero_intervalos
                 self.secciones[i].seguir(
                     x_obj, y_obj, 1, self.direccion,
-                    pivot.posicion_x, pivot.posicion_y, rumbo,
+                    pivote.posicion_x, pivote.posicion_y, rumbo,
                 )
 
             # FSS: corrige posición de sus tramos flanqueantes al eje Cart→End
-            self._angulo_referencia = self.fss.actualizar(x_cart, y_cart, x_end, y_end)
+            self._angulo_referencia_grados = self.fss.actualizar(x_cart, y_cart, x_end, y_end)
 
             if self.torre_rapida.motor_activo:
                 self._segundos_motor_rapido_on += 1
@@ -230,17 +225,16 @@ class Lineal:
         der = self.secciones[indice + 1]
         dx  = der.posicion_x - izq.posicion_x
         dy  = der.posicion_y - izq.posicion_y
-        lh  = abs(dx)
-        L   = math.hypot(dx, dy)
 
-        ang_abs = math.degrees(math.atan2(dy, lh)) if lh > 0 else 0.0
-        ang_ref = self._angulo_referencia
-        ang_rel = ang_abs - ang_ref
-        while ang_rel >  180: ang_rel -= 360
-        while ang_rel < -180: ang_rel += 360
+        distancia_horizontal = abs(dx)
+        longitud_real        = math.hypot(dx, dy)
 
-        if lh > 0:
-            dy_esperado   = math.tan(math.radians(ang_ref)) * lh
+        angulo_absoluto   = math.degrees(math.atan2(dy, distancia_horizontal)) if distancia_horizontal > 0 else 0.0
+        angulo_referencia = self._angulo_referencia_grados
+        angulo_relativo   = (angulo_absoluto - angulo_referencia + 180) % 360 - 180
+
+        if distancia_horizontal > 0:
+            dy_esperado   = math.tan(math.radians(angulo_referencia)) * distancia_horizontal
             desv_relativa = dy - dy_esperado
         else:
             desv_relativa = dy
@@ -248,11 +242,11 @@ class Lineal:
         return {
             "x0": izq.posicion_x, "y0": izq.posicion_y,
             "x1": der.posicion_x, "y1": der.posicion_y,
-            "longitud":                  L,
+            "longitud":                  longitud_real,
             "desviacion_norte":          dy,
             "desviacion_norte_relativa": desv_relativa,
-            "angulo_grados":             ang_abs,
-            "angulo_relativo_grados":    ang_rel,
+            "angulo_grados":             angulo_absoluto,
+            "angulo_relativo_grados":    angulo_relativo,
             "esta_alineado":             abs(desv_relativa) < FreeStandingSpan.TOLERANCIA_ALINEACION,
             "es_rigido":                 (indice == self.indice_fss_izq),
         }
@@ -265,3 +259,12 @@ class Lineal:
         m = (self.tiempo_total_segundos % 3600) // 60
         s = self.tiempo_total_segundos % 60
         return f"{h:02d}h {m:02d}m {s:02d}s"
+
+    def _validar_seccion_intermedia(self, indice_seccion: int) -> TramoIntermedio:
+        """Valida que el índice apunte a un TramoIntermedio y lo devuelve."""
+        if not (1 <= indice_seccion <= self.numero_tramos - 1):
+            raise ValueError(f"indice_seccion debe estar entre 1 y {self.numero_tramos - 1}")
+        seccion = self.secciones[indice_seccion]
+        if not isinstance(seccion, TramoIntermedio):
+            raise ValueError(f"La sección {indice_seccion} no es un TramoIntermedio")
+        return seccion

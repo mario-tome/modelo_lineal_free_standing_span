@@ -28,6 +28,16 @@ def avanzar_en_circunferencia(
     )
 
 
+def _metros_recorridos(velocidad_nominal: float, factor_velocidad: float,
+                        segundos: float, porcentaje_patinaje: float) -> float:
+    """
+    Distancia real recorrida aplicando el patinaje aleatorio de las ruedas.
+    El patinaje reduce entre el 50 % y el 100 % del nivel configurado en cada paso.
+    """
+    reduccion_patinaje = 1.0 - (porcentaje_patinaje / 100.0) * random.uniform(0.5, 1.0)
+    return velocidad_nominal * factor_velocidad * (segundos / 60.0) * reduccion_patinaje
+
+
 class TramoFinal:
     """
     Sección extrema del lineal: Cart (izquierda) o End-tower (derecha).
@@ -52,24 +62,24 @@ class TramoFinal:
 
     def actualizar_motor(self, segundo_en_ciclo: int, duracion_ciclo: int = 60):
         """Activa o detiene el motor según el segundo actual dentro del ciclo de 60 s."""
-        tiempo_activo     = self.velocidad_porcentaje / 100.0 * duracion_ciclo
-        self.motor_activo = segundo_en_ciclo < tiempo_activo
+        segundos_activo   = self.velocidad_porcentaje / 100.0 * duracion_ciclo
+        self.motor_activo = segundo_en_ciclo < segundos_activo
 
     def avanzar(self, segundos: float, direccion: int = 1, rumbo: float = 0.0) -> float:
         """Avanza si el motor está activo. Devuelve los metros recorridos."""
         if not self.motor_activo:
             return 0.0
 
-        factor_patinaje = 1.0 - (self.porcentaje_patinaje / 100.0) * random.uniform(0.5, 1.0)
-        metros = self.velocidad_nominal * (segundos / 60.0) * factor_patinaje
+        metros = _metros_recorridos(self.velocidad_nominal, 1.0, segundos, self.porcentaje_patinaje)
 
         self.posicion_x += math.sin(rumbo) * metros * direccion
         self.posicion_y += math.cos(rumbo) * metros * direccion
 
         if self.ruido_lateral > 0.0:
-            ruido = random.gauss(0.0, self.ruido_lateral * metros)
-            self.posicion_x += math.cos(rumbo) * ruido
-            self.posicion_y -= math.sin(rumbo) * ruido
+            # Pequeña deriva perpendicular al rumbo para simular suelo irregular
+            deriva = random.gauss(0.0, self.ruido_lateral * metros)
+            self.posicion_x += math.cos(rumbo) * deriva
+            self.posicion_y -= math.sin(rumbo) * deriva
 
         return metros
 
@@ -78,7 +88,7 @@ class TramoIntermedio:
     """
     Sección intermedia del lineal.
     Sigue la diagonal Cart→End activando su motor cuando se retrasa respecto al objetivo.
-    Su factor de velocidad es 1.5 por defecto
+    Su factor de velocidad es 1.5 por defecto; el FSS puede elevarlo a 2.0 en el tramo derecho.
     """
 
     FACTOR_VELOCIDAD_NORMAL = 1.5   # el motor intermedio avanza ×1.5 sobre la velocidad nominal
@@ -100,48 +110,56 @@ class TramoIntermedio:
 
     def seguir(self, objetivo_x: float, objetivo_y: float,
                segundos: float, direccion: int = 1,
-               pivot_x: float = None, pivot_y: float = None,
+               pivote_x: float = None, pivote_y: float = None,
                rumbo: float = 0.0) -> float:
         """
         Sigue el objetivo sobre la diagonal Cart→End.
         Activa el motor si está retrasada; lo detiene si está adelantada.
-        Si se pasa pivot_x/pivot_y el movimiento es en arco; si no, en línea recta.
+        Si se pasan pivote_x/pivote_y el movimiento es en arco; si no, en línea recta.
         """
         dx = objetivo_x - self.posicion_x
         dy = objetivo_y - self.posicion_y
 
-        avance_x = math.sin(rumbo)
-        avance_y = math.cos(rumbo)
-        # + = está retrasada respecto al objetivo  ·  - = está adelantada
-        desviacion = (dx * avance_x + dy * avance_y) * direccion
+        # Proyección del vector al objetivo sobre la dirección de avance:
+        # positivo = sección retrasada  ·  negativo = sección adelantada
+        dir_avance_x   = math.sin(rumbo)
+        dir_avance_y   = math.cos(rumbo)
+        retraso_metros = (dx * dir_avance_x + dy * dir_avance_y) * direccion
 
-        if desviacion >= self.UMBRAL_ARRANQUE:
+        if retraso_metros >= self.UMBRAL_ARRANQUE:
             self.motor_activo = True
-        elif desviacion <= -self.UMBRAL_ADELANTO:
+        elif retraso_metros <= -self.UMBRAL_ADELANTO:
             self.motor_activo = False
 
         if not self.motor_activo:
             return 0.0
 
-        factor_patinaje = 1.0 - (self.porcentaje_patinaje / 100.0) * random.uniform(0.5, 1.0)
-        metros = self.velocidad_nominal * self.factor_velocidad * (segundos / 60.0) * factor_patinaje
+        metros = _metros_recorridos(self.velocidad_nominal, self.factor_velocidad, segundos, self.porcentaje_patinaje)
 
-        if pivot_x is not None and pivot_y is not None:
-            # La dirección del arco depende de si la sección está a la derecha o izquierda del pivot
-            derecha_x  = math.cos(rumbo)
-            derecha_y  = -math.sin(rumbo)
-            dot        = (self.posicion_x - pivot_x) * derecha_x + (self.posicion_y - pivot_y) * derecha_y
-            signo_arco = 1 if dot > 0 else -1
-            self.posicion_x, self.posicion_y = avanzar_en_circunferencia(
-                pivot_x, pivot_y, self.longitud_tramo,
-                self.posicion_x, self.posicion_y,
-                metros * direccion * signo_arco,
-            )
+        if pivote_x is not None and pivote_y is not None:
+            self._avanzar_en_arco(pivote_x, pivote_y, metros, direccion, rumbo)
         else:
-            self.posicion_x += avance_x * metros * direccion
-            self.posicion_y += avance_y * metros * direccion
+            self.posicion_x += dir_avance_x * metros * direccion
+            self.posicion_y += dir_avance_y * metros * direccion
 
         return metros
+
+    def _avanzar_en_arco(self, pivote_x: float, pivote_y: float,
+                          metros: float, direccion: int, rumbo: float):
+        """
+        Mueve la sección en arco alrededor del pivote.
+        La dirección del giro depende de si la sección está a la derecha o izquierda del pivote.
+        """
+        derecha_x = math.cos(rumbo)
+        derecha_y = -math.sin(rumbo)
+        # dot > 0: sección a la derecha → gira antihorario; dot < 0: izquierda → horario
+        dot        = (self.posicion_x - pivote_x) * derecha_x + (self.posicion_y - pivote_y) * derecha_y
+        signo_arco = 1 if dot > 0 else -1
+        self.posicion_x, self.posicion_y = avanzar_en_circunferencia(
+            pivote_x, pivote_y, self.longitud_tramo,
+            self.posicion_x, self.posicion_y,
+            metros * direccion * signo_arco,
+        )
 
 
 class FreeStandingSpan:
@@ -181,24 +199,24 @@ class FreeStandingSpan:
         Recoloca los tramos acompañantes simétricos al centro FSS, paralelos al eje Cart→End.
         Devuelve el ángulo de referencia en grados.
         """
-        cx = (self.tramo_izq.posicion_x + self.tramo_der.posicion_x) / 2.0
-        cy = (self.tramo_izq.posicion_y + self.tramo_der.posicion_y) / 2.0
+        centro_x = (self.tramo_izq.posicion_x + self.tramo_der.posicion_x) / 2.0
+        centro_y = (self.tramo_izq.posicion_y + self.tramo_der.posicion_y) / 2.0
 
-        dx            = end_x - cart_x
-        dy            = end_y - cart_y
-        longitud_eje  = math.hypot(dx, dy)
+        dx           = end_x - cart_x
+        dy           = end_y - cart_y
+        longitud_eje = math.hypot(dx, dy)
 
         if longitud_eje < 1e-9:
-            ux, uy = 1.0, 0.0
+            eje_x, eje_y = 1.0, 0.0
         else:
-            ux = dx / longitud_eje
-            uy = dy / longitud_eje
+            eje_x = dx / longitud_eje
+            eje_y = dy / longitud_eje
 
-        media = self.longitud / 2.0
-        self.tramo_izq.posicion_x = cx - ux * media
-        self.tramo_izq.posicion_y = cy - uy * media
-        self.tramo_der.posicion_x = cx + ux * media
-        self.tramo_der.posicion_y = cy + uy * media
+        mitad = self.longitud / 2.0
+        self.tramo_izq.posicion_x = centro_x - eje_x * mitad
+        self.tramo_izq.posicion_y = centro_y - eje_y * mitad
+        self.tramo_der.posicion_x = centro_x + eje_x * mitad
+        self.tramo_der.posicion_y = centro_y + eje_y * mitad
 
         self._angulo_referencia_grados = math.degrees(math.atan2(dy, dx))
         return self._angulo_referencia_grados
