@@ -39,7 +39,7 @@ def build_figure(lineal: Lineal | None, longitud_campo: float,
                  vista_general: bool = False,
                  rastros_secciones: list | None = None,
                  trayectoria_xy: list | None = None) -> go.Figure:
-    """Construye la figura Plotly del campo con secciones y tramos."""
+    """Construye la figura Plotly del campo con secciones y tramos"""
 
     if lineal is None:
         fig = go.Figure()
@@ -274,8 +274,7 @@ def build_figure(lineal: Lineal | None, longitud_campo: float,
             hoverinfo="skip", showlegend=False))
         trazos.append(go.Scatter(
             x=[sec.posicion_x], y=[sec.posicion_y], mode="markers",
-            marker=dict(color=color, size=tamanio, symbol=simbolo,
-                        line=dict(color=color_borde_contactor, width=2)),
+            marker=dict(color=color, size=tamanio, symbol=simbolo, line=dict(color=color_borde_contactor, width=2)),
             hovertemplate=hover, showlegend=False))
 
         desplazamiento_anotacion = -90 if i % 2 == 0 else 90

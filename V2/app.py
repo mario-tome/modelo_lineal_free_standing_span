@@ -1,6 +1,6 @@
 import sys
 from pathlib import Path
-sys.path.insert(0, str(Path(__file__).parent.parent))  # añade pivot_lineal/ al path
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import streamlit as st
 from V2.logica.estado import get_sim, CLAVES_SIMULACION

@@ -4,7 +4,7 @@ from V2.modelos import METROS_POR_GRADO_LAT
 
 
 def get_origen_latlon() -> tuple:
-    """Latitud y longitud de origen según el modo de conexión activo."""
+    """Latitud y longitud de origen según el modo de conexión activo"""
     modo = st.session_state.get("k_conexion_modo", "ninguno")
     if modo == "caja":
         return (
@@ -20,7 +20,7 @@ def get_origen_latlon() -> tuple:
 
 
 def parse_trayectoria(texto: str, lat_origen: float, lon_origen: float) -> list:
-    """Convierte texto "lat_e7 lon_e7" (una línea por punto) a lista de (x, y) en metros."""
+    """Convierte texto "lat_e7 lon_e7" (una línea por punto) a lista de (x, y) en metros"""
     metros_por_grado_lon = METROS_POR_GRADO_LAT * math.cos(math.radians(lat_origen))
     puntos = []
     for linea in texto.strip().splitlines():
@@ -30,8 +30,8 @@ def parse_trayectoria(texto: str, lat_origen: float, lon_origen: float) -> list:
         try:
             lat = int(partes[0]) / 1e7
             lon = int(partes[1]) / 1e7
-            y   = (lat - lat_origen) * METROS_POR_GRADO_LAT
-            x   = (lon - lon_origen) * metros_por_grado_lon
+            y = (lat - lat_origen) * METROS_POR_GRADO_LAT
+            x = (lon - lon_origen) * metros_por_grado_lon
             puntos.append((x, y))
         except (ValueError, ZeroDivisionError):
             continue
@@ -43,9 +43,8 @@ def calcular_errores(gps_x: float, gps_y: float,
                      historial_posiciones: list,
                      en_marcha_atras: bool = False) -> tuple:
     """
-    Calcula el error de distancia (mm) y de rumbo (grados) entre la posición GPS
-    y el segmento de trayectoria más cercano.
-    Devuelve (error_distancia_mm, error_rumbo_grados) o (None, None) si no hay suficientes datos.
+    Calcula el error de distancia (mm) y de rumbo (grados) entre la posición GPS y el segmento de trayectoria más cercano
+    Devuelve (error_distancia_mm, error_rumbo_grados) o (None, None) si no hay suficientes datos
     """
     if len(puntos_trayectoria) < 2:
         return None, None
@@ -64,8 +63,7 @@ def calcular_errores(gps_x: float, gps_y: float,
         else:
             # Proyección del punto GPS sobre el segmento (0 = inicio, 1 = fin)
             proyeccion = max(0.0, min(1.0, ((gps_x - x0) * delta_x + (gps_y - y0) * delta_y) / longitud_cuadrada))
-            distancia  = math.hypot(gps_x - (x0 + proyeccion * delta_x),
-                                    gps_y - (y0 + proyeccion * delta_y))
+            distancia  = math.hypot(gps_x - (x0 + proyeccion * delta_x), gps_y - (y0 + proyeccion * delta_y))
         if distancia < distancia_minima:
             distancia_minima = distancia
             indice_segmento  = i
@@ -86,7 +84,7 @@ def calcular_errores(gps_x: float, gps_y: float,
         xb, yb = historial_posiciones[-1]
         if (xb - xa) ** 2 + (yb - ya) ** 2 > 1e-10:
             azimut_actual = math.degrees(math.atan2(xb - xa, yb - ya))
-            error_azimut  = azimut_actual - azimut_objetivo
-            error_rumbo   = (error_azimut + 180) % 360 - 180
-
+            error_azimut = azimut_actual - azimut_objetivo
+            error_rumbo = (error_azimut + 180) % 360 - 180
+ 
     return error_distancia_mm, error_rumbo

@@ -1,7 +1,7 @@
 
         <!DOCTYPE html><html><head><script>
             var _init = false;
-            var _st   = {left: false, right: false, reverse: false};
+            var _st = {left: false, right: false, reverse: false};
 
             function _send() {
                 window.parent.postMessage({
@@ -20,8 +20,8 @@
                     window.parent.document.addEventListener('keydown', function(e) {
                         if (e.repeat) return;
                         var ch = false;
-                        if (e.key === '<')              { _st.left    = true;          ch = true; }
-                        if (e.key === '-')              { _st.right   = true;          ch = true; }
+                        if (e.key === '<') { _st.left = true; ch = true; }
+                        if (e.key === '-') { _st.right = true; ch = true; }
                         if (e.key.toLowerCase() === 'r'){ _st.reverse = !_st.reverse;  ch = true; }
                         if (ch) _send();
                     });

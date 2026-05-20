@@ -1,8 +1,8 @@
 import streamlit as st
 from .constantes import get_defaults
 
-# Conjunto de claves que pertenecen al estado de la simulación (no a la UI de Streamlit).
-# Usado para inicializar y resetear el SimState correctamente.
+# Conjunto de claves que pertenecen al estado de la simulación (no a la UI de Streamlit)
+# Usado para inicializar y resetear el SimState correctamente
 CLAVES_SIMULACION = frozenset(get_defaults().keys())
 
 

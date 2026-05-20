@@ -8,7 +8,7 @@ with open(os.path.join(_DIRECTORIO_KBD, "index.html"), "w", encoding="utf-8") as
     _f.write("""
         <!DOCTYPE html><html><head><script>
             var _init = false;
-            var _st   = {left: false, right: false, reverse: false};
+            var _st = {left: false, right: false, reverse: false};
 
             function _send() {
                 window.parent.postMessage({
@@ -27,8 +27,8 @@ with open(os.path.join(_DIRECTORIO_KBD, "index.html"), "w", encoding="utf-8") as
                     window.parent.document.addEventListener('keydown', function(e) {
                         if (e.repeat) return;
                         var ch = false;
-                        if (e.key === '<')              { _st.left    = true;          ch = true; }
-                        if (e.key === '-')              { _st.right   = true;          ch = true; }
+                        if (e.key === '<') { _st.left = true; ch = true; }
+                        if (e.key === '-') { _st.right = true; ch = true; }
                         if (e.key.toLowerCase() === 'r'){ _st.reverse = !_st.reverse;  ch = true; }
                         if (ch) _send();
                     });
@@ -78,12 +78,12 @@ def manejar_teclado():
             })
 
     if sim.lineal and sim.en_marcha:
-        lineal          = sim.lineal
+        lineal = sim.lineal
         ralentizar_cart = bool(estado_teclado.get("left",  False))
-        ralentizar_end  = bool(estado_teclado.get("right", False))
+        ralentizar_end = bool(estado_teclado.get("right", False))
 
         if ralentizar_cart != lineal.slow_down_cart or ralentizar_end != lineal.slow_down_end_tower:
-            lineal.slow_down_cart      = ralentizar_cart
+            lineal.slow_down_cart = ralentizar_cart
             lineal.slow_down_end_tower = ralentizar_end
             if ralentizar_cart:
                 mensaje = "Teclado < — Cart ralentizado, giro gradual hacia izquierda"
