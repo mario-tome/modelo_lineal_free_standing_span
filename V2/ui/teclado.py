@@ -8,7 +8,7 @@ with open(os.path.join(_DIRECTORIO_KBD, "index.html"), "w", encoding="utf-8") as
     _f.write("""
         <!DOCTYPE html><html><head><script>
             var _init = false;
-            var _st   = {left: false, right: false, reverse: false};
+            var _st = {left: false, right: false, reverse: false};
 
             function _send() {
                 window.parent.postMessage({
@@ -27,8 +27,8 @@ with open(os.path.join(_DIRECTORIO_KBD, "index.html"), "w", encoding="utf-8") as
                     window.parent.document.addEventListener('keydown', function(e) {
                         if (e.repeat) return;
                         var ch = false;
-                        if (e.key === '<')              { _st.left    = true;          ch = true; }
-                        if (e.key === '-')              { _st.right   = true;          ch = true; }
+                        if (e.key === '<') { _st.left = true; ch = true; }
+                        if (e.key === '-') { _st.right = true; ch = true; }
                         if (e.key.toLowerCase() === 'r'){ _st.reverse = !_st.reverse;  ch = true; }
                         if (ch) _send();
                     });
@@ -58,32 +58,32 @@ def manejar_teclado():
 
     estado_teclado = _giro_kbd(default=None)
 
-    if not st.session_state.get("_is_operator", False):
+    if not st.session_state.get("es_operador", False):
         return
 
     if not isinstance(estado_teclado, dict):
         return
 
-    kbd_reverse_ahora  = estado_teclado.get("reverse", False)
-    kbd_reverse_previo = st.session_state.marcha_atras_kbd
-    if kbd_reverse_ahora != kbd_reverse_previo:
-        st.session_state.marcha_atras_kbd = kbd_reverse_ahora
-        if sim.lineal and sim.running:
+    tecla_reversa_ahora  = estado_teclado.get("reverse", False)
+    tecla_reversa_previa = st.session_state.tecla_reversa_activa
+    if tecla_reversa_ahora != tecla_reversa_previa:
+        st.session_state.tecla_reversa_activa = tecla_reversa_ahora
+        if sim.lineal and sim.en_marcha:
             lineal = sim.lineal
             lineal.invertir_direccion()
-            sim.log.append({
+            sim.registro.append({
                 "t":    lineal._tiempo_formateado(),
                 "tipo": "INFO",
                 "msg":  "MARCHA ATRÁS activada" if lineal.en_marcha_atras else "Avance normal activado",
             })
 
-    if sim.lineal and sim.running:
-        lineal          = sim.lineal
+    if sim.lineal and sim.en_marcha:
+        lineal = sim.lineal
         ralentizar_cart = bool(estado_teclado.get("left",  False))
-        ralentizar_end  = bool(estado_teclado.get("right", False))
+        ralentizar_end = bool(estado_teclado.get("right", False))
 
         if ralentizar_cart != lineal.slow_down_cart or ralentizar_end != lineal.slow_down_end_tower:
-            lineal.slow_down_cart      = ralentizar_cart
+            lineal.slow_down_cart = ralentizar_cart
             lineal.slow_down_end_tower = ralentizar_end
             if ralentizar_cart:
                 mensaje = "Teclado < — Cart ralentizado, giro gradual hacia izquierda"
@@ -91,7 +91,7 @@ def manejar_teclado():
                 mensaje = "Teclado - — End-tower ralentizado, giro gradual hacia derecha"
             else:
                 mensaje = "Teclado liberado — velocidad normal"
-            sim.log.append({
+            sim.registro.append({
                 "t":    lineal._tiempo_formateado(),
                 "tipo": "INFO",
                 "msg":  mensaje,

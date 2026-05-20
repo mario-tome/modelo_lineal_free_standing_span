@@ -37,9 +37,9 @@ def _estilo_seccion(lineal: Lineal, i: int):
 def build_figure(lineal: Lineal | None, longitud_campo: float,
                  posicion_norte: float = 0.0,
                  vista_general: bool = False,
-                 tower_trails: list | None = None,
+                 rastros_secciones: list | None = None,
                  trayectoria_xy: list | None = None) -> go.Figure:
-    """Construye la figura Plotly del campo con secciones y tramos."""
+    """Construye la figura Plotly del campo con secciones y tramos"""
 
     if lineal is None:
         fig = go.Figure()
@@ -125,10 +125,10 @@ def build_figure(lineal: Lineal | None, longitud_campo: float,
         line=dict(color="rgba(255,255,255,0.04)", width=1, dash="dot"),
         hoverinfo="skip", showlegend=False))
 
-    # Trails de secciones
-    if tower_trails:
+    # Rastros históricos de cada sección
+    if rastros_secciones:
         for idx_sec in range(len(lineal.secciones)):
-            trail = tower_trails[idx_sec] if idx_sec < len(tower_trails) else []
+            trail = rastros_secciones[idx_sec] if idx_sec < len(rastros_secciones) else []
             if len(trail) < 2:
                 continue
             color_sec, _, _, _ = _estilo_seccion(lineal, idx_sec)
@@ -274,8 +274,7 @@ def build_figure(lineal: Lineal | None, longitud_campo: float,
             hoverinfo="skip", showlegend=False))
         trazos.append(go.Scatter(
             x=[sec.posicion_x], y=[sec.posicion_y], mode="markers",
-            marker=dict(color=color, size=tamanio, symbol=simbolo,
-                        line=dict(color=color_borde_contactor, width=2)),
+            marker=dict(color=color, size=tamanio, symbol=simbolo, line=dict(color=color_borde_contactor, width=2)),
             hovertemplate=hover, showlegend=False))
 
         desplazamiento_anotacion = -90 if i % 2 == 0 else 90
