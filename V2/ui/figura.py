@@ -1,3 +1,4 @@
+import math
 import plotly.graph_objects as go
 from V2.modelos import Lineal, TramoFinal, TramoIntermedio
 
@@ -32,6 +33,56 @@ def _estilo_seccion(lineal: Lineal, i: int):
     if i <= lineal.indice_fss_izq:
         return "#58a6ff", "circle", f"I{i}", 14
     return "#56d364", "circle", f"I{i}", 14
+
+
+def _hex_a_rgba(hex_color: str, alpha: float) -> str:
+    """Convierte #rrggbb a rgba(r,g,b,alpha) para usar como fillcolor de Plotly."""
+    h = hex_color.lstrip("#")
+    r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+    return f"rgba({r},{g},{b},{alpha})"
+
+
+def _geometria_viga(x0: float, y0: float, x1: float, y1: float,
+                    semi_ancho: float, n_outline: int = 20, n_celdas: int = 6
+                    ) -> tuple[list, list, list, list]:
+    """
+    Calcula la silueta y la celosía interior de una viga estructural entre dos extremos.
+    La sección transversal es sinusoidal: ancha en el centro, apuntada en los extremos.
+    Devuelve (outline_xs, outline_ys, lat_xs, lat_ys) para construir trazos Plotly.
+    """
+    dx, dy = x1 - x0, y1 - y0
+    longitud = math.hypot(dx, dy)
+    if longitud < 1e-6:
+        return [], [], [], []
+
+    px, py = -dy / longitud, dx / longitud  # vector perpendicular unitario
+
+    def punto(t: float, lado: float) -> tuple[float, float]:
+        cx, cy = x0 + t * dx, y0 + t * dy
+        w = semi_ancho * math.sin(math.pi * t)
+        return cx + lado * w * px, cy + lado * w * py
+
+    # Silueta exterior: arco superior de A→B, arco inferior de B→A, cierra en A
+    ts = [i / (n_outline - 1) for i in range(n_outline)]
+    top = [punto(t, +1) for t in ts]
+    bot = [punto(t, -1) for t in ts]
+    outline_xs = [p[0] for p in top] + [p[0] for p in reversed(bot)] + [top[0][0]]
+    outline_ys = [p[1] for p in top] + [p[1] for p in reversed(bot)] + [top[0][1]]
+
+    # Celosía interna: diagonales cruzadas entre nodos equidistantes
+    ts_div = [i / n_celdas for i in range(n_celdas + 1)]
+    pts_t = [punto(t, +1) for t in ts_div]
+    pts_b = [punto(t, -1) for t in ts_div]
+    lat_xs, lat_ys = [], []
+    for i in range(n_celdas):
+        # Diagonal ↗: nodo inferior izq → nodo superior der
+        lat_xs += [pts_b[i][0], pts_t[i + 1][0], None]
+        lat_ys += [pts_b[i][1], pts_t[i + 1][1], None]
+        # Diagonal ↘: nodo superior izq → nodo inferior der
+        lat_xs += [pts_t[i][0], pts_b[i + 1][0], None]
+        lat_ys += [pts_t[i][1], pts_b[i + 1][1], None]
+
+    return outline_xs, outline_ys, lat_xs, lat_ys
 
 
 def build_figure(lineal: Lineal | None, longitud_campo: float,
@@ -176,14 +227,28 @@ def build_figure(lineal: Lineal | None, longitud_campo: float,
             f"<extra></extra>"
         )
 
-        trazos.append(go.Scatter(
-            x=[sp["x0"], sp["x1"]], y=[sp["y0"], sp["y1"]], mode="lines",
-            line=dict(color=color, width=14), opacity=0.12,
-            hoverinfo="skip", showlegend=False))
-        trazos.append(go.Scatter(
-            x=[sp["x0"], sp["x1"]], y=[sp["y0"], sp["y1"]], mode="lines",
-            line=dict(color=color, width=4),
-            hovertemplate=hover, showlegend=False))
+        longitud_span = math.hypot(sp["x1"] - sp["x0"], sp["y1"] - sp["y0"])
+        # FSS más ancho para reflejar su mayor rigidez estructural
+        semi_ancho = longitud_span * (0.070 if sp["es_rigido"] else 0.055)
+        outline_xs, outline_ys, lat_xs, lat_ys = _geometria_viga(
+            sp["x0"], sp["y0"], sp["x1"], sp["y1"], semi_ancho
+        )
+        if outline_xs:
+            # Cuerpo de la viga: polígono relleno, hover en toda el área
+            trazos.append(go.Scatter(
+                x=outline_xs, y=outline_ys, mode="lines",
+                fill="toself", fillcolor=_hex_a_rgba(color, 0.13),
+                line=dict(color=color, width=1.5),
+                hoveron="fills", hovertemplate=hover,
+                showlegend=False,
+            ))
+        if lat_xs:
+            # Celosía interior (diagonales X — sin hover)
+            trazos.append(go.Scatter(
+                x=lat_xs, y=lat_ys, mode="lines",
+                line=dict(color=color, width=0.9), opacity=0.50,
+                hoverinfo="skip", showlegend=False,
+            ))
 
         mx, my = (sp["x0"] + sp["x1"]) / 2, (sp["y0"] + sp["y1"]) / 2
         if sp["es_rigido"]:
@@ -199,6 +264,21 @@ def build_figure(lineal: Lineal | None, longitud_campo: float,
             bgcolor="rgba(13,17,23,0.82)", bordercolor=color,
             borderwidth=1, borderpad=5, xref="x", yref="y", align="center",
         ))
+
+    # Eje transversal de rodaje de cada sección (vista cenital del tren de ruedas)
+    xs_ejes, ys_ejes = [], []
+    for sec in lineal.secciones:
+        # Las torres guía (Cart/End) tienen un tren más ancho que las intermedias
+        ancho_eje = (lineal.longitud_tramo * 0.110 if isinstance(sec, TramoFinal)
+                     else lineal.longitud_tramo * 0.075)
+        xs_ejes += [sec.posicion_x - ancho_eje, sec.posicion_x + ancho_eje, None]
+        ys_ejes += [sec.posicion_y, sec.posicion_y, None]
+    trazos.append(go.Scatter(
+        x=xs_ejes, y=ys_ejes, mode="lines",
+        line=dict(color="#555d68", width=5),
+        opacity=0.80,
+        hoverinfo="skip", showlegend=False,
+    ))
 
     # Secciones (puntos con etiquetas)
     total_secciones = len(lineal.secciones)
