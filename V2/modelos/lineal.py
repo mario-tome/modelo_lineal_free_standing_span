@@ -3,7 +3,7 @@ from .componentes import (
     TramoFinal,
     TramoIntermedio,
     FreeStandingSpan,
-    ReferenciaGPS,
+    AntenaGPS,
     CajaInterfaz,
 )
 
@@ -79,7 +79,6 @@ class Lineal:
         self.slow_down_cart: bool = False
         self.slow_down_end_tower: bool = False
 
-        self.gps: ReferenciaGPS | None = None
         self.caja_interfaz: CajaInterfaz | None = None
 
         self._angulo_referencia_grados: float = 0.0  # atan2(dy, dx) del eje Cart - End Tower
@@ -125,25 +124,28 @@ class Lineal:
         self.tramo_cart.velocidad_porcentaje = self.velocidad_porcentaje
         self.tramo_end.velocidad_porcentaje = self.velocidad_porcentaje
 
-    def asignar_gps(self, indice_seccion: int,
-                    lat_origen: float, lon_origen: float,
-                    puerto_serial: str = None,
-                    baudrate: int = 9600,
-                    verbose_consola: bool = False):
-        seccion = self._validar_seccion_intermedia(indice_seccion)
-        self.gps = ReferenciaGPS(seccion, lat_origen, lon_origen, puerto_serial, baudrate, verbose_consola)
-
-    def asignar_caja(self, indice_seccion: int,
-                     lat_origen: float, lon_origen: float,
-                     puerto_serial: str,
+    def asignar_caja(self, indice_tramo: int,
+                     metros_path: float,
+                     metros_heading: float,
+                     lat_origen: float,
+                     lon_origen: float,
+                     puerto_path: str,
+                     puerto_heading: str,
                      carr: int = 2):
-        seccion = self._validar_seccion_intermedia(indice_seccion)
+        """
+        Configura la caja de guiado con los dos GPS en el tramo indicado
+        metros_path / metros_heading: distancia desde el inicio del tramo donde va cada antena
+        """
+        if not (0 <= indice_tramo < self.numero_tramos):
+            raise ValueError(f"indice_tramo debe estar entre 0 y {self.numero_tramos - 1}")
+        inicio = self.secciones[indice_tramo]
+        fin = self.secciones[indice_tramo + 1]
         self.caja_interfaz = CajaInterfaz(
-            tramo=seccion,
-            lat_origen=lat_origen,
-            lon_origen=lon_origen,
-            puerto_serial=puerto_serial,
-            carr=carr,
+            antena_path = AntenaGPS(inicio, fin, metros_path, lat_origen, lon_origen),
+            antena_heading = AntenaGPS(inicio, fin, metros_heading, lat_origen, lon_origen),
+            puerto_path = puerto_path,
+            puerto_heading = puerto_heading,
+            carr = carr,
         )
 
     def avanza(self, segundos: int = 1):

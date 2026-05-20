@@ -1,6 +1,6 @@
 import csv, math, os
 import streamlit as st
-from V2.modelos import Lineal, TramoFinal, TramoIntermedio
+from V2.modelos import Lineal, TramoFinal, TramoIntermedio, AntenaGPS, CajaInterfaz
 from V2.logica.constantes import TERRENOS
 from V2.logica.estado import get_sim, SimState
 from V2.logica.trayectoria import get_origen_latlon, parse_trayectoria, calcular_errores
@@ -37,9 +37,7 @@ def _sincronizar_configuracion(sim: SimState, lineal: Lineal) -> list:
     lineal.tramo_end.ruido_lateral  = nivel_patinaje
 
     interferencia_mm = float(ui.get("k_interferencia_gps_mm", 0))
-    if lineal.gps:
-        lineal.gps.interferencia_gps_mm = interferencia_mm
-    elif lineal.caja_interfaz:
+    if lineal.caja_interfaz:
         lineal.caja_interfaz.interferencia_gps_mm = interferencia_mm
 
     sim.auto_reverse_activo = bool(ui.get("k_auto_reverse", False))
@@ -51,13 +49,12 @@ def _sincronizar_configuracion(sim: SimState, lineal: Lineal) -> list:
 
 def _procesar_mensajes_caja(sim: SimState, lineal: Lineal) -> None:
     """
-    Procesa los mensajes recibidos del Arduino (caja de interfaz):
+    Procesa los mensajes recibidos de la caja de interfaz:
     actualiza slow_down, detecta safety/GPS fail y reanuda automáticamente.
     """
-    if not lineal.caja_interfaz:
+    caja = lineal.caja_interfaz
+    if not caja:
         return
-
-    caja   = lineal.caja_interfaz
     previo = sim.estado_previo_caja
 
     # Cambios en slow_down (solo se registran si la simulación está en marcha)
@@ -161,16 +158,6 @@ def _avanzar_tick(sim: SimState, lineal: Lineal, segundos: int, puntos_tray: lis
 
     _escribir_fila_csv(sim, _construir_fila_csv(sim, lineal))
 
-    if lineal.gps:
-        sim.historial_gps.append({
-            "Tiempo": lineal._tiempo_formateado(),
-            "LAT ×10⁷": lineal.gps.lat_e7,
-            "LON ×10⁷": lineal.gps.lon_e7,
-            "Lat (°)": round(lineal.gps.latitud, 7),
-            "Lon (°)": round(lineal.gps.longitud, 7),
-        })
-        if len(sim.historial_gps) > 20:
-            sim.historial_gps = sim.historial_gps[-20:]
 
     # Log de alineación: detecta desalineamientos y recuperaciones tramo a tramo
     alineacion_actual = [lineal.get_span_alineado(j) for j in range(lineal.numero_tramos)]
@@ -205,8 +192,8 @@ def _gestionar_limites(sim: SimState, lineal: Lineal) -> None:
     else:
         if lineal.posicion_norte >= sim.longitud_campo:
             lineal.stop()
-            if lineal.gps:
-                lineal.gps.detener_transmision_background()
+            if lineal.caja_interfaz:
+                lineal.caja_interfaz.detener()
             sim.registro.append({"t": lineal._tiempo_formateado(), "tipo": "FIN", "msg": f"Riego completado — {lineal.posicion_norte:.2f} m en {lineal._tiempo_formateado()}"})
             sim.en_marcha  = False
             sim.completado = True
@@ -254,8 +241,14 @@ def _construir_fila_csv(sim: SimState, lineal: Lineal) -> dict:
             fila[f"tramo_{j+1}_desv_norte"] = round(sp["desviacion_norte"], 4)
             fila[f"tramo_{j+1}_rumbo_deg"] = round(sp["angulo_grados"], 4)
 
-    fila["lat_e7"] = lineal.gps.lat_e7 if lineal.gps else None
-    fila["lon_e7"] = lineal.gps.lon_e7 if lineal.gps else None
+    if lineal.caja_interfaz:
+        fila["path_lat_e7"]    = lineal.caja_interfaz.antena_path.lat_e7
+        fila["path_lon_e7"]    = lineal.caja_interfaz.antena_path.lon_e7
+        fila["heading_lat_e7"] = lineal.caja_interfaz.antena_heading.lat_e7
+        fila["heading_lon_e7"] = lineal.caja_interfaz.antena_heading.lon_e7
+    else:
+        fila["path_lat_e7"] = fila["path_lon_e7"] = None
+        fila["heading_lat_e7"] = fila["heading_lon_e7"] = None
     fila["error_distancia_mm"] = round(sim.error_distancia_mm, 1) if sim.error_distancia_mm is not None else None
     fila["error_rumbo_deg"] = round(sim.error_rumbo_grados, 2) if sim.error_rumbo_grados is not None else None
     return fila
@@ -276,14 +269,16 @@ def _escribir_fila_csv(sim: SimState, fila: dict) -> None:
 
 # MÉTODOS DEL GPS
 
-def _get_tramo_gps(lineal: Lineal) -> tuple[TramoFinal | TramoIntermedio | None, int]:
-    """Devuelve (tramo_gps, indice_en_secciones) o (None, -1) si no hay GPS configurado"""
-    sensor = lineal.gps or lineal.caja_interfaz
-    if sensor is None:
+def _get_tramo_gps(lineal: Lineal) -> tuple[AntenaGPS | None, int]:
+    """
+    Devuelve (antena_path, indice_de_seccion_inicio) o (None, -1) si no hay caja configurada.
+    La antena_path es la que guía (la que genera slow_down) y tiene posicion_x/y en tiempo real.
+    """
+    if not lineal.caja_interfaz:
         return None, -1
-    tramo = sensor.tramo
+    antena = lineal.caja_interfaz.antena_path
     try:
-        return tramo, lineal.secciones.index(tramo)
+        return antena, lineal.secciones.index(antena.seccion_inicio)
     except ValueError:
         return None, -1
 
@@ -485,44 +480,28 @@ def panel_principal():
                 unsafe_allow_html=True,
             )
 
-    # Métricas GPS
-    if lineal and lineal.gps:
-        gps = lineal.gps
-        indice_seccion_gps = lineal.secciones.index(gps.tramo)
-        columnas_gps = st.columns(4)
-        lat = gps.lat_e7 / 1e7
-        lon = gps.lon_e7 / 1e7
-        previo = sim.coordenadas_gps_previas
-        delta_lat = round(lat - previo["lat"], 7) if previo else None
-        delta_lon = round(lon - previo["lon"], 7) if previo else None
-
-        columnas_gps[0].metric("GPS · Sección", f"TramoIntermedio {indice_seccion_gps}")
-        columnas_gps[1].metric("Latitud",  f"{lat:.7f}°", delta=f"{delta_lat:+.7f}°" if delta_lat is not None else None)
-        columnas_gps[2].metric("Longitud", f"{lon:.7f}°", delta=f"{delta_lon:+.7f}°" if delta_lon is not None else None)
-        columnas_gps[3].metric("Formato ×10⁷", f"{gps.lat_e7}  /  {gps.lon_e7}")
-        sim.coordenadas_gps_previas = {"lat": lat, "lon": lon}
-
-    # Caja de interfaz Arduino 
+    # Métricas caja de interfaz GPS
     if lineal and lineal.caja_interfaz:
         caja = lineal.caja_interfaz
-        indice_seccion_caja = lineal.secciones.index(caja.tramo)
         color_safety = "#3fb950" if caja.safety_ok else "#f85149"
-        color_gps_estado = "#3fb950" if caja.gps_ok else "#f85149"
-        color_cart = "#ffa657" if caja.slow_down_cart else "#484f58"
-        color_end = "#ffa657" if caja.slow_down_end_tower else "#484f58"
+        color_gps_ok = "#3fb950" if caja.gps_ok   else "#f85149"
+        color_cart   = "#ffa657" if caja.slow_down_cart      else "#484f58"
+        color_end    = "#ffa657" if caja.slow_down_end_tower else "#484f58"
 
-        columnas_caja = st.columns(6)
-        columnas_caja[0].metric("Caja · Sección GPS", f"TramoIntermedio {indice_seccion_caja}")
-        columnas_caja[1].metric("GPS enviado", f"{caja.lat_e7} / {caja.lon_e7}", help=f"{caja.latitud:.7f}°  {caja.longitud:.7f}°  Carr {caja.carr}")
-        columnas_caja[2].metric("Safety", "OK" if caja.safety_ok else "FAIL")
-        columnas_caja[3].metric("GPS status", "OK" if caja.gps_ok else "FAIL")
-        columnas_caja[4].metric("Slow Cart", "ON" if caja.slow_down_cart else "—")
-        columnas_caja[5].metric("Slow EndT", "ON" if caja.slow_down_end_tower else "—")
+        col_p, col_h, col_sf, col_gk, col_sc, col_se = st.columns(6)
+        col_p.metric("GPS Path",    f"{caja.antena_path.lat_e7} / {caja.antena_path.lon_e7}",
+                     help=f"{caja.antena_path.latitud:.7f}°  {caja.antena_path.longitud:.7f}°")
+        col_h.metric("GPS Heading", f"{caja.antena_heading.lat_e7} / {caja.antena_heading.lon_e7}",
+                     help=f"{caja.antena_heading.latitud:.7f}°  {caja.antena_heading.longitud:.7f}°")
+        col_sf.metric("Safety",    "OK" if caja.safety_ok           else "FAIL")
+        col_gk.metric("GPS status","OK" if caja.gps_ok              else "FAIL")
+        col_sc.metric("Slow Cart", "ON" if caja.slow_down_cart      else "—")
+        col_se.metric("Slow EndT", "ON" if caja.slow_down_end_tower else "—")
         st.markdown(
             f"<div style='display:flex;gap:12px;margin:-12px 0 8px 0;flex-wrap:wrap;align-items:center'>"
             f"<span style='font-size:0.92rem;font-weight:700;color:{color_safety};font-family:monospace'>"
             f"&#9679; SAFETY {'OK' if caja.safety_ok else 'FAIL'}</span>"
-            f"<span style='font-size:0.92rem;font-weight:700;color:{color_gps_estado};font-family:monospace'>"
+            f"<span style='font-size:0.92rem;font-weight:700;color:{color_gps_ok};font-family:monospace'>"
             f"&#9679; GPS {'OK' if caja.gps_ok else 'FAIL'}</span>"
             f"<span style='font-size:0.92rem;font-weight:700;color:{color_cart};font-family:monospace'>"
             f"&#9679; SLOW_CART {'ON' if caja.slow_down_cart else 'OFF'}</span>"
@@ -538,9 +517,9 @@ def panel_principal():
     trayectoria_visible = sim.trayectoria_activa or st.session_state.get("k_tray_activa", False)
 
     if trayectoria_visible:
-        col_toggle, col_error_dist, col_error_rumbo, col_log, col_csv, col_gps_track = st.columns([1, 1, 1, 3, 1, 3])
+        col_toggle, col_error_dist, col_error_rumbo, col_log, col_csv, _esp = st.columns([1, 1, 1, 3, 1, 3])
     else:
-        col_toggle, col_log, col_csv, col_gps_track = st.columns([1, 3, 1, 4])
+        col_toggle, col_log, col_csv, _esp = st.columns([1, 3, 1, 4])
         col_error_dist = col_error_rumbo = None
 
     with col_toggle:
@@ -584,10 +563,6 @@ def panel_principal():
                         unsafe_allow_html=True,
                     )
 
-        with col_gps_track:
-            if sim.historial_gps:
-                with st.expander(f"Track GPS — {len(sim.historial_gps)} lecturas", expanded=False):
-                    st.dataframe(sim.historial_gps[::-1], hide_index=True, width="stretch")
 
     # Figura Plotly del campo
     posicion_norte = lineal.posicion_norte if lineal is not None else 0.0

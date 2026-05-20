@@ -85,6 +85,36 @@ def _geometria_viga(x0: float, y0: float, x1: float, y1: float,
     return outline_xs, outline_ys, lat_xs, lat_ys
 
 
+def _anadir_halo_gps(trazos: list, anotaciones: list,
+                      gps_x: float, gps_y: float,
+                      antena, etiqueta: str, color: str, ay: int) -> None:
+    """Añade a la figura el halo, el marcador de cruz y la anotación de posición de una antena GPS."""
+    trazos.append(go.Scatter(
+        x=[gps_x], y=[gps_y], mode="markers",
+        marker=dict(color=color, size=42, opacity=0.15, symbol="circle"),
+        hoverinfo="skip", showlegend=False,
+    ))
+    trazos.append(go.Scatter(
+        x=[gps_x], y=[gps_y], mode="markers",
+        marker=dict(color=color, size=12, symbol="circle-cross-open",
+                    line=dict(color=color, width=2.5)),
+        hovertemplate=(
+            f"<b>{etiqueta}</b><br>LAT: <b>{antena.lat_e7}</b><br>LON: <b>{antena.lon_e7}</b><br>"
+            f"{antena.latitud:.7f}°,  {antena.longitud:.7f}°<extra></extra>"
+        ),
+        showlegend=False,
+    ))
+    anotaciones.append(dict(
+        x=gps_x, y=gps_y, xref="x", yref="y",
+        text=f"<b>{etiqueta}</b><br>{antena.latitud:.5f}°<br>{antena.longitud:.5f}°",
+        showarrow=True, arrowhead=2, arrowwidth=1.5, arrowsize=0.7,
+        arrowcolor=color, ax=0, ay=ay,
+        font=dict(color=color, size=13, family="monospace"),
+        bgcolor="rgba(22,27,34,0.92)",
+        bordercolor=color, borderwidth=1, borderpad=10, align="center",
+    ))
+
+
 def build_figure(lineal: Lineal | None, longitud_campo: float,
                  posicion_norte: float = 0.0,
                  vista_general: bool = False,
@@ -111,17 +141,17 @@ def build_figure(lineal: Lineal | None, longitud_campo: float,
     trazos, formas, anotaciones = [], [], []
 
     _ANCHO_INTERIOR_PX = 960
-    _ALTO_INTERIOR_PX = 660
-    _MARGEN_VERTICAL = 140
+    _ALTO_INTERIOR_PX  = 660
+    _MARGEN_VERTICAL   = 140
 
     pad_x = ancho_campo * 0.06
     pad_y = max(20.0, ancho_campo * 0.05)
 
     if not vista_general:
         rango_x_metros = ancho_campo + 2 * pad_x
-        alto_viewport = rango_x_metros * _ALTO_INTERIOR_PX / _ANCHO_INTERIOR_PX - 2 * pad_y
-        alto_viewport = max(alto_viewport, ancho_campo * 0.25)
-        rango_total_y = alto_viewport + 2 * pad_y
+        alto_viewport  = rango_x_metros * _ALTO_INTERIOR_PX / _ANCHO_INTERIOR_PX - 2 * pad_y
+        alto_viewport  = max(alto_viewport, ancho_campo * 0.25)
+        rango_total_y  = alto_viewport + 2 * pad_y
 
         if rango_total_y >= alto_campo + 2 * pad_y:
             y_lo = -pad_y
@@ -137,8 +167,8 @@ def build_figure(lineal: Lineal | None, longitud_campo: float,
                 y_lo = y_hi - rango_total_y
 
         rango_y_metros = y_hi - y_lo
-        altura_figura = int(_ANCHO_INTERIOR_PX * rango_y_metros / rango_x_metros) + _MARGEN_VERTICAL
-        altura_figura = max(400, min(altura_figura, 950))
+        altura_figura  = int(_ANCHO_INTERIOR_PX * rango_y_metros / rango_x_metros) + _MARGEN_VERTICAL
+        altura_figura  = max(400, min(altura_figura, 950))
         usar_scaleanchor = True
     else:
         y_lo = -alto_campo * 0.20
@@ -282,12 +312,6 @@ def build_figure(lineal: Lineal | None, longitud_campo: float,
 
     # Secciones (puntos con etiquetas)
     total_secciones = len(lineal.secciones)
-    indice_seccion_gps = -1
-    if lineal.gps:
-        try:
-            indice_seccion_gps = lineal.secciones.index(lineal.gps.tramo)
-        except ValueError:
-            pass
 
     for i, sec in enumerate(lineal.secciones):
         color, simbolo, etiqueta, tamanio = _estilo_seccion(lineal, i)
@@ -304,7 +328,6 @@ def build_figure(lineal: Lineal | None, longitud_campo: float,
             nombre = f"TramoIntermedio {i}  [cascada derecha]"
 
         motor_activo = sec.motor_activo
-
         en_slow_down = (
             isinstance(sec, TramoFinal) and (
                 (i == 0 and lineal.slow_down_cart) or
@@ -313,24 +336,17 @@ def build_figure(lineal: Lineal | None, longitud_campo: float,
         )
 
         if isinstance(sec, TramoFinal):
-            if en_slow_down:
-                texto_motor = f"Motor: {'ON' if motor_activo else 'OFF'}  (sigue motor rápido)"
-            else:
-                texto_motor = f"Motor: {'ON' if motor_activo else 'OFF'}  (duty cycle {sec.velocidad_porcentaje:.0f}%)"
+            texto_motor = (
+                f"Motor: {'ON' if motor_activo else 'OFF'}  (sigue motor rápido)" if en_slow_down
+                else f"Motor: {'ON' if motor_activo else 'OFF'}  (duty cycle {sec.velocidad_porcentaje:.0f}%)"
+            )
         else:
             texto_motor = f"Motor: {'ON — corrigiendo' if motor_activo else 'OFF — alineada'}"
 
-        hover_gps = ""
-        if i == indice_seccion_gps:
-            g = lineal.gps
-            hover_gps = (
-                f"<br><span style='color:#58d68d'>&#128225; GPS</span><br>"
-                f"LAT: <b>{g.lat_e7}</b><br>LON: <b>{g.lon_e7}</b>"
-            )
         hover = (
             f"<b>{nombre}</b><br>"
             f"X = {sec.posicion_x:.0f} m<br>Y = {sec.posicion_y:.3f} m<br>"
-            f"{texto_motor}{hover_gps}<extra></extra>"
+            f"{texto_motor}<extra></extra>"
         )
 
         color_borde_contactor = "#3fb950" if motor_activo else "#484f58"
@@ -357,46 +373,26 @@ def build_figure(lineal: Lineal | None, longitud_campo: float,
             marker=dict(color=color, size=tamanio, symbol=simbolo, line=dict(color=color_borde_contactor, width=2)),
             hovertemplate=hover, showlegend=False))
 
-        desplazamiento_anotacion = -90 if i % 2 == 0 else 90
-        if i == indice_seccion_gps:
-            desplazamiento_anotacion = 90
         anotaciones.append(dict(
             x=sec.posicion_x, y=sec.posicion_y, xref="x", yref="y",
             text=f"<b>{etiqueta}</b>  X={sec.posicion_x:.2f} m  Y={sec.posicion_y:.2f} m<br>{texto_estado}",
             showarrow=True, arrowhead=2, arrowwidth=1.5, arrowsize=0.7,
-            arrowcolor=color, ax=0, ay=desplazamiento_anotacion,
+            arrowcolor=color, ax=0, ay=-90 if i % 2 == 0 else 90,
             font=dict(color=color_estado, size=13, family="monospace"),
             bgcolor="rgba(22,27,34,0.92)",
             bordercolor=color_estado, borderwidth=1, borderpad=10,
             align="center",
         ))
 
-    # Halo GPS
-    if lineal.gps is not None:
-        gps = lineal.gps
-        gps_x = gps.tramo.posicion_x
-        gps_y = gps.tramo.posicion_y
-        trazos.append(go.Scatter(
-            x=[gps_x], y=[gps_y], mode="markers",
-            marker=dict(color="#58d68d", size=42, opacity=0.15, symbol="circle"),
-            hoverinfo="skip", showlegend=False))
-        trazos.append(go.Scatter(
-            x=[gps_x], y=[gps_y], mode="markers",
-            marker=dict(color="#58d68d", size=12, symbol="circle-cross-open", line=dict(color="#58d68d", width=2.5)),
-            hovertemplate=(
-                f"<b>GPS</b><br>LAT: <b>{gps.lat_e7}</b><br>LON: <b>{gps.lon_e7}</b><br>"
-                f"{gps.latitud:.7f}°,  {gps.longitud:.7f}°<extra></extra>"
-            ),
-            showlegend=False))
-        anotaciones.append(dict(
-            x=gps_x, y=gps_y, xref="x", yref="y",
-            text=f"<b>GPS</b><br>{gps.latitud:.5f}°<br>{gps.longitud:.5f}°",
-            showarrow=True, arrowhead=2, arrowwidth=1.5, arrowsize=0.7,
-            arrowcolor="#58d68d", ax=0, ay=-100,
-            font=dict(color="#58d68d", size=13, family="monospace"),
-            bgcolor="rgba(22,27,34,0.92)",
-            bordercolor="#58d68d", borderwidth=1, borderpad=10, align="center",
-        ))
+    # Halos GPS (antena path en verde, antena heading en azul)
+    if lineal.caja_interfaz is not None:
+        caja = lineal.caja_interfaz
+        _anadir_halo_gps(trazos, anotaciones,
+                          caja.antena_path.posicion_x, caja.antena_path.posicion_y,
+                          caja.antena_path, "GPS Path", "#3fb950", 100)
+        _anadir_halo_gps(trazos, anotaciones,
+                          caja.antena_heading.posicion_x, caja.antena_heading.posicion_y,
+                          caja.antena_heading, "GPS Heading", "#79c0ff", -120)
 
     pasos_nice = [1, 2, 5, 10, 20, 25, 50, 100, 200, 250, 500, 1000]
     paso_ticks = next((s for s in pasos_nice if alto_campo / s <= 15), 1000)

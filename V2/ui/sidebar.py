@@ -14,7 +14,6 @@ try:
 except ImportError:
     _SERIAL_DISPONIBLE = False
 
-SIN_PUERTO      = "— Sin puerto (solo consola) —"
 SIN_CAJA_PUERTO = "— Selecciona puerto —"
 
 
@@ -60,9 +59,7 @@ def _renderizar_sidebar_observador(sim: SimState) -> None:
     st.divider()
     st.markdown("##### Conexión")
     if lineal.caja_interfaz:
-        st.markdown("<span style='color:#e6edf3;font-size:0.85rem'>Caja de interfaz Arduino (115 200 baud)</span>", unsafe_allow_html=True)
-    elif lineal.gps:
-        st.markdown("<span style='color:#e6edf3;font-size:0.85rem'>GPS directo (9 600 baud)</span>", unsafe_allow_html=True)
+        st.markdown("<span style='color:#e6edf3;font-size:0.85rem'>Caja de interfaz GPS — 2 Arduinos I2C (115 200 baud)</span>", unsafe_allow_html=True)
     else:
         st.markdown("<span style='color:#8b949e;font-size:0.85rem'>Sin conexión externa</span>", unsafe_allow_html=True)
 
@@ -116,28 +113,18 @@ def _iniciar_simulacion(
     sim.lineal.start()
     sim.registro.append({"t": "00h 00m 00s", "tipo": "START", "msg": "Sistema iniciado"})
 
-    modo = state.get("k_conexion_modo", "ninguno")
-    if modo == "gps":
-        puerto_raw = state.get("k_gps_puerto", SIN_PUERTO)
-        puerto = None if puerto_raw == SIN_PUERTO else puerto_raw
-        sim.lineal.asignar_gps(
-            indice_seccion  = state.get("k_gps_torre", 1),
-            lat_origen = state.get("k_gps_lat_e7", 404168000) / 1e7,
-            lon_origen = state.get("k_gps_lon_e7", -37038000) / 1e7,
-            puerto_serial = puerto,
-            verbose_consola = (puerto is None),
-        )
-        sim.lineal.gps.iniciar_transmision_background()
-
-    if modo == "caja":
-        puerto_caja = state.get("k_caja_puerto", "")
-        if puerto_caja and puerto_caja != SIN_CAJA_PUERTO:
+    if state.get("k_conexion_modo") == "caja":
+        puerto_path    = state.get("k_caja_puerto_path", "")
+        puerto_heading = state.get("k_caja_puerto_heading", "")
+        if puerto_path and puerto_path != SIN_CAJA_PUERTO:
             sim.lineal.asignar_caja(
-                indice_seccion = state.get("k_caja_torre", 1),
-                lat_origen = state.get("k_caja_lat_e7", 404168000) / 1e7,
-                lon_origen = state.get("k_caja_lon_e7", -37038000) / 1e7,
-                puerto_serial = puerto_caja,
-                carr = state.get("k_caja_carr", 2),
+                indice_tramo   = state.get("k_caja_tramo", 0),
+                metros_path    = float(state.get("k_caja_metros_path", longitud_tramo * 0.25)),
+                metros_heading = float(state.get("k_caja_metros_heading", longitud_tramo * 0.75)),
+                lat_origen     = state.get("k_caja_lat_e7", 404168000) / 1e7,
+                lon_origen     = state.get("k_caja_lon_e7", -37038000) / 1e7,
+                puerto_path    = puerto_path,
+                puerto_heading = puerto_heading if puerto_heading and puerto_heading != SIN_CAJA_PUERTO else puerto_path,
             )
             sim.lineal.caja_interfaz.iniciar()
 
@@ -158,8 +145,6 @@ def _iniciar_simulacion(
 
 def _limpiar_y_resetear() -> None:
     sim = get_sim()
-    if sim.lineal and sim.lineal.gps:
-        sim.lineal.gps.detener_transmision_background()
     if sim.lineal and sim.lineal.caja_interfaz:
         sim.lineal.caja_interfaz.detener()
     valores_iniciales = get_defaults()
@@ -186,27 +171,8 @@ def _renderizar_referencia_teclado(activo: bool = True) -> None:
         )
 
 
-def _renderizar_seccion_conexion_gps(numero_tramos: int, bloqueado: bool, puertos: list) -> None:
-    st.selectbox(
-        "TramoIntermedio con el GPS",
-        options=list(range(1, numero_tramos)),
-        key="k_gps_torre", disabled=bloqueado,
-        format_func=lambda i: f"TramoIntermedio {i}",
-    )
-    col_lat, col_lon = st.columns(2)
-    col_lat.number_input("Lat. origen (×10⁷)", value=404168000, step=1, key="k_gps_lat_e7", disabled=bloqueado)
-    col_lon.number_input("Lon. origen (×10⁷)", value=-37038000, step=1, key="k_gps_lon_e7", disabled=bloqueado)
-    st.markdown('<p style="font-size:0.875rem;margin:0 0 4px 0">Puerto serie</p>', unsafe_allow_html=True)
-    col_puerto, col_refrescar = st.columns([6, 1])
-    with col_puerto:
-        st.selectbox("Puerto", options=[SIN_PUERTO] + puertos,
-                     key="k_gps_puerto", disabled=bloqueado, label_visibility="collapsed")
-    with col_refrescar:
-        if st.button("↺", help="Actualizar puertos", disabled=bloqueado, width="stretch"):
-            st.rerun()
-
-
-def _renderizar_seccion_conexion_caja(numero_tramos: int, bloqueado: bool, puertos: list) -> None:
+def _renderizar_seccion_conexion_caja(numero_tramos: int, longitud_tramo: float,
+                                       bloqueado: bool, puertos: list) -> None:
     state = st.session_state
     state["k_caja_carr"] = 2  # Carr=2 significa RTK FIX (la caja Arduino solo acepta este modo de posicionamiento)
 
@@ -214,30 +180,48 @@ def _renderizar_seccion_conexion_caja(numero_tramos: int, bloqueado: bool, puert
     col_lat.number_input("Lat. origen (×10⁷)", value=404168000, step=1, key="k_caja_lat_e7", disabled=bloqueado)
     col_lon.number_input("Lon. origen (×10⁷)", value=-37038000, step=1, key="k_caja_lon_e7", disabled=bloqueado)
 
-    lat_origen_e7 = state.get("k_caja_lat_e7", 404168000)
-    lon_origen_e7 = state.get("k_caja_lon_e7", -37038000)
-    longitud_tramo_config = state.get("k_tlen", 50)
-    metros_por_grado_lon  = 111320.0 * math.cos(math.radians(lat_origen_e7 / 1e7))
-
-    def _etiqueta_seccion(i):
-        lon_i = round((lon_origen_e7 / 1e7 + longitud_tramo_config * i / metros_por_grado_lon) * 1e7)
-        return f"TramoIntermedio {i}  ({lat_origen_e7} / {lon_i})"
-
     st.selectbox(
-        "TramoIntermedio GPS",
-        options=list(range(1, numero_tramos)),
-        key="k_caja_torre", disabled=bloqueado,
-        format_func=_etiqueta_seccion,
-        help="Sección cuya posición se envía al Arduino como coordenada GPS.",
+        "Tramo con los GPS",
+        options=list(range(numero_tramos)),
+        key="k_caja_tramo", disabled=bloqueado,
+        format_func=lambda i: f"Tramo {i + 1}  (secciones {i} → {i + 1})",
     )
-    st.markdown('<p style="font-size:0.875rem;margin:0 0 4px 0">Puerto serie Arduino</p>', unsafe_allow_html=True)
-    col_puerto, col_refrescar = st.columns([6, 1])
-    with col_puerto:
-        st.selectbox("Puerto caja", options=puertos if puertos else [SIN_CAJA_PUERTO], key="k_caja_puerto", disabled=bloqueado, label_visibility="collapsed")
-    with col_refrescar:
-        if st.button("↺", help="Actualizar puertos", disabled=bloqueado, width="stretch", key="btn_ref_caja"):
+
+    col_pm, col_hm = st.columns(2)
+    col_pm.number_input(
+        "GPS Path — metros desde inicio tramo",
+        min_value=0.0, max_value=float(longitud_tramo),
+        value=round(longitud_tramo * 0.25, 1), step=0.5,
+        key="k_caja_metros_path", disabled=bloqueado,
+        help="Distancia desde el inicio del tramo donde se monta la antena Path (guiado).",
+    )
+    col_hm.number_input(
+        "GPS Heading — metros desde inicio tramo",
+        min_value=0.0, max_value=float(longitud_tramo),
+        value=round(longitud_tramo * 0.75, 1), step=0.5,
+        key="k_caja_metros_heading", disabled=bloqueado,
+        help="Distancia desde el inicio del tramo donde se monta la antena Heading (referencia).",
+    )
+
+    st.markdown('<p style="font-size:0.875rem;margin:4px 0 4px 0">Puerto Arduino Path (slow_down)</p>', unsafe_allow_html=True)
+    col_pp, col_r1 = st.columns([6, 1])
+    with col_pp:
+        st.selectbox("Puerto path", options=puertos if puertos else [SIN_CAJA_PUERTO],
+                     key="k_caja_puerto_path", disabled=bloqueado, label_visibility="collapsed")
+    with col_r1:
+        if st.button("↺", help="Actualizar puertos", disabled=bloqueado, width="stretch", key="btn_ref_path"):
             st.rerun()
-    st.caption("Arduino conectado por USB · Carr=2 (RTK FIX) fijo")
+
+    st.markdown('<p style="font-size:0.875rem;margin:4px 0 4px 0">Puerto Arduino Heading (referencia)</p>', unsafe_allow_html=True)
+    col_ph, col_r2 = st.columns([6, 1])
+    with col_ph:
+        st.selectbox("Puerto heading", options=puertos if puertos else [SIN_CAJA_PUERTO],
+                     key="k_caja_puerto_heading", disabled=bloqueado, label_visibility="collapsed")
+    with col_r2:
+        if st.button("↺", help="Actualizar puertos", disabled=bloqueado, width="stretch", key="btn_ref_heading"):
+            st.rerun()
+
+    st.caption("2 Arduinos comunicados por I2C · Carr=2 (RTK FIX) · 115 200 baud")
 
 
 def _renderizar_seccion_trayectoria(bloqueado: bool) -> None:
@@ -251,9 +235,8 @@ def _renderizar_seccion_trayectoria(bloqueado: bool) -> None:
     if "k_tray_punto_contador" not in state:
         state.k_tray_punto_contador = 0
 
-    modo = state.get("k_conexion_modo", "ninguno")
-    lat_defecto = state.get("k_caja_lat_e7" if modo == "caja" else "k_gps_lat_e7", 404168000)
-    lon_defecto = state.get("k_caja_lon_e7" if modo == "caja" else "k_gps_lon_e7", -37038000)
+    lat_defecto = state.get("k_caja_lat_e7", 404168000)
+    lon_defecto = state.get("k_caja_lon_e7", -37038000)
 
     puntos = state.k_tray_puntos
     if puntos:
@@ -416,11 +399,10 @@ def renderizar_sidebar():
         st.markdown("##### Conexión externa")
         st.radio(
             "Modo de conexión",
-            options=["ninguno", "gps", "caja"],
+            options=["ninguno", "caja"],
             format_func=lambda k: {
                 "ninguno": "Sin conexión",
-                "gps": "GPS directo  (cable cruzado, 9 600 baud)",
-                "caja": "Caja de interfaz Arduino  (115 200 baud)",
+                "caja":    "Caja de interfaz GPS  (2 Arduinos, I2C, 115 200 baud)",
             }[k],
             key="k_conexion_modo", disabled=bloqueado,
             label_visibility="collapsed",
@@ -428,13 +410,10 @@ def renderizar_sidebar():
         modo_conexion = state.get("k_conexion_modo", "ninguno")
         puertos = [p.device for p in _list_ports.comports()] if _SERIAL_DISPONIBLE else []
 
-        if modo_conexion == "gps":
-            _renderizar_seccion_conexion_gps(numero_tramos, bloqueado, puertos)
+        if modo_conexion == "caja":
+            _renderizar_seccion_conexion_caja(numero_tramos, longitud_tramo, bloqueado, puertos)
 
         if modo_conexion == "caja":
-            _renderizar_seccion_conexion_caja(numero_tramos, bloqueado, puertos)
-
-        if modo_conexion in ("gps", "caja"):
             st.divider()
             st.markdown("##### Interferencia GPS simulada")
             interferencia = st.slider(
@@ -464,8 +443,6 @@ def renderizar_sidebar():
         elif sim.en_marcha:
             if st.button("STOP", key="btn_stop", width="stretch"):
                 sim.lineal.stop()
-                if sim.lineal.gps:
-                    sim.lineal.gps.detener_transmision_background()
                 if sim.lineal.caja_interfaz:
                     sim.lineal.caja_interfaz.detener()
                 sim.registro.append({"t": sim.lineal._tiempo_formateado(), "tipo": "STOP", "msg": f"Sistema pausado en {sim.lineal.posicion_norte:.2f} m"})
@@ -483,8 +460,6 @@ def renderizar_sidebar():
             col_continuar, col_reset = st.columns(2)
             if col_continuar.button("CONTINUAR", key="btn_start", type="primary", width="stretch", disabled=continuar_bloqueado):
                 sim.lineal.start()
-                if sim.lineal.gps:
-                    sim.lineal.gps.iniciar_transmision_background()
                 if sim.lineal.caja_interfaz:
                     sim.lineal.caja_interfaz.iniciar()
                 sim.registro.append({"t": sim.lineal._tiempo_formateado(), "tipo": "START", "msg": f"Sistema reanudado desde {sim.lineal.posicion_norte:.2f} m"})

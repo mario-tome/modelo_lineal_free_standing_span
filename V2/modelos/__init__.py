@@ -3,9 +3,9 @@ from .componentes import (
     TramoFinal,
     TramoIntermedio,
     FreeStandingSpan,
-    ReferenciaGPS,
+    AntenaGPS,
+    CajaInterfaz,
     Centro,
     TramoCorner,
-    CajaInterfaz,
 )
 from .lineal import Lineal
