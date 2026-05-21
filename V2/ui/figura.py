@@ -295,16 +295,25 @@ def build_figure(lineal: Lineal | None, longitud_campo: float,
             borderwidth=1, borderpad=5, xref="x", yref="y", align="center",
         ))
 
-    # Eje transversal de rodaje de cada sección (vista cenital del tren de ruedas)
-    xs_ejes, ys_ejes = [], []
-    for sec in lineal.secciones:
-        # Las torres guía (Cart/End) tienen un tren más ancho que las intermedias
-        ancho_eje = (lineal.longitud_tramo * 0.110 if isinstance(sec, TramoFinal)
-                     else lineal.longitud_tramo * 0.075)
-        xs_ejes += [sec.posicion_x - ancho_eje, sec.posicion_x + ancho_eje, None]
-        ys_ejes += [sec.posicion_y, sec.posicion_y, None]
+    # Tubo central que une todas las secciones — refuerza la sensación de tubo corrido
     trazos.append(go.Scatter(
-        x=xs_ejes, y=ys_ejes, mode="lines",
+        x=[sec.posicion_x for sec in lineal.secciones],
+        y=[sec.posicion_y for sec in lineal.secciones],
+        mode="lines",
+        line=dict(color="#555d68", width=2.5),
+        opacity=0.70,
+        hoverinfo="skip", showlegend=False,
+    ))
+
+    # Columna vertical de cada torre (vista cenital del soporte) — corta y perpendicular al tubo
+    xs_torres, ys_torres = [], []
+    for sec in lineal.secciones:
+        semi_alto = (lineal.longitud_tramo * 0.055 if isinstance(sec, TramoFinal)
+                     else lineal.longitud_tramo * 0.038)
+        xs_torres += [sec.posicion_x, sec.posicion_x, None]
+        ys_torres += [sec.posicion_y - semi_alto, sec.posicion_y + semi_alto, None]
+    trazos.append(go.Scatter(
+        x=xs_torres, y=ys_torres, mode="lines",
         line=dict(color="#555d68", width=5),
         opacity=0.80,
         hoverinfo="skip", showlegend=False,
