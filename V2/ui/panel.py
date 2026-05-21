@@ -507,7 +507,7 @@ def panel_principal():
             f"&#9679; SLOW_CART {'ON' if caja.slow_down_cart else 'OFF'}</span>"
             f"<span style='font-size:0.92rem;font-weight:700;color:{color_end};font-family:monospace'>"
             f"&#9679; SLOW_END_TWR {'ON' if caja.slow_down_end_tower else 'OFF'}</span>"
-            f"<span style='font-size:0.82rem;color:#484f58;font-family:monospace'>"
+            f"<span style='font-size:0.92rem;font-weight:700;color:#e6edf3;font-family:monospace'>"
             f"último msg: {caja.ultimo_mensaje or '—'}</span>"
             f"</div>",
             unsafe_allow_html=True,
