@@ -88,7 +88,7 @@ def _geometria_viga(x0: float, y0: float, x1: float, y1: float,
 def _anadir_halo_gps(trazos: list, anotaciones: list,
                       gps_x: float, gps_y: float,
                       antena, etiqueta: str, color: str, ay: int) -> None:
-    """Añade a la figura el halo, el marcador de cruz y la anotación de posición de una antena GPS."""
+    """Añade halo, marcador de cruz y anotación de posición de una antena GPS."""
     trazos.append(go.Scatter(
         x=[gps_x], y=[gps_y], mode="markers",
         marker=dict(color=color, size=42, opacity=0.15, symbol="circle"),
@@ -106,7 +106,7 @@ def _anadir_halo_gps(trazos: list, anotaciones: list,
     ))
     anotaciones.append(dict(
         x=gps_x, y=gps_y, xref="x", yref="y",
-        text=f"<b>{etiqueta}</b><br>{antena.latitud:.5f}°<br>{antena.longitud:.5f}°",
+        text=f"<b>{etiqueta}</b><br>{antena.lat_e7}<br>{antena.lon_e7}",
         showarrow=True, arrowhead=2, arrowwidth=1.5, arrowsize=0.7,
         arrowcolor=color, ax=0, ay=ay,
         font=dict(color=color, size=13, family="monospace"),
@@ -389,7 +389,7 @@ def build_figure(lineal: Lineal | None, longitud_campo: float,
         caja = lineal.caja_interfaz
         _anadir_halo_gps(trazos, anotaciones,
                           caja.antena_path.posicion_x, caja.antena_path.posicion_y,
-                          caja.antena_path, "GPS Path", "#3fb950", 100)
+                          caja.antena_path, "GPS Path", "#f778ba", 100)
         _anadir_halo_gps(trazos, anotaciones,
                           caja.antena_heading.posicion_x, caja.antena_heading.posicion_y,
                           caja.antena_heading, "GPS Heading", "#79c0ff", -120)
@@ -422,5 +422,8 @@ def build_figure(lineal: Lineal | None, longitud_campo: float,
         xaxis=config_eje_x, yaxis=config_eje_y,
         shapes=formas, annotations=anotaciones,
         hovermode="closest", dragmode="pan",
+        # uirevision constante: Plotly.react actualiza anotaciones (texto + posición)
+        # en cada re-render del fragmento sin resetear el zoom/pan del usuario
+        uirevision="lineal_v2",
     )
     return fig
