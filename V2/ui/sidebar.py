@@ -55,12 +55,23 @@ def _renderizar_sidebar_observador(sim: SimState) -> None:
 
     velocidad_media = lineal.velocidad_nominal * lineal.velocidad_porcentaje / 100.0
     st.markdown(
-        f"<div style='background:#161b22;border:1px solid #30363d;border-radius:8px;"
-        f"padding:8px 12px;margin:2px 0 10px 0;display:flex;justify-content:space-between'>"
-        f"<span><span style='color:#8b949e;font-size:0.7rem'>Panel speed </span>"
-        f"<b style='color:#e6edf3;font-family:monospace'>{lineal.velocidad_porcentaje} %</b></span>"
-        f"<span><span style='color:#8b949e;font-size:0.7rem'>MEDIA </span>"
-        f"<b style='color:#3fb950;font-family:monospace'>{velocidad_media:.2f} m/min</b></span>"
+        f"<div style='background:#161b22;border:1px solid #30363d;border-radius:10px;"
+        f"padding:12px 16px;margin:4px 0 10px 0;"
+        f"display:grid;grid-template-columns:1fr 1fr;gap:4px'>"
+        f"<div>"
+        f"<div style='color:#8b949e;font-size:0.72rem;letter-spacing:1.5px;"
+        f"text-transform:uppercase;font-family:monospace;margin-bottom:4px'>Panel speed</div>"
+        f"<div style='color:#e6edf3;font-size:1.1rem;font-weight:700;font-family:monospace;line-height:1'>"
+        f"{lineal.velocidad_porcentaje}"
+        f"<span style='color:#8b949e;font-size:0.82rem;font-weight:400'> %</span></div>"
+        f"</div>"
+        f"<div>"
+        f"<div style='color:#8b949e;font-size:0.72rem;letter-spacing:1.5px;"
+        f"text-transform:uppercase;font-family:monospace;margin-bottom:4px'>Vel. media</div>"
+        f"<div style='color:#3fb950;font-size:1.1rem;font-weight:700;font-family:monospace;line-height:1'>"
+        f"{velocidad_media:.2f}"
+        f"<span style='color:#8b949e;font-size:0.82rem;font-weight:400'> m/min</span></div>"
+        f"</div>"
         f"</div>",
         unsafe_allow_html=True,
     )
@@ -354,13 +365,23 @@ def renderizar_sidebar():
         )
         velocidad_media = velocidad_porcentaje / 100 * velocidad_nominal
         st.markdown(
-            f"<div style='background:#161b22;border:1px solid #30363d;border-radius:8px;"
-            f"padding:8px 12px;margin:2px 0 10px 0;display:flex;justify-content:space-between'>"
-            f"<span><span style='color:#8b949e;font-size:0.7rem'>ON </span>"
-            f"<b style='color:#e6edf3;font-family:monospace'>{velocidad_porcentaje * 60 / 100:.0f} s</b>"
-            f"<span style='color:#8b949e;font-size:0.7rem'> / 60 s</span></span>"
-            f"<span><span style='color:#8b949e;font-size:0.7rem'>MEDIA </span>"
-            f"<b style='color:#3fb950;font-family:monospace'>{velocidad_media:.2f} m/min</b></span>"
+            f"<div style='background:#161b22;border:1px solid #30363d;border-radius:10px;"
+            f"padding:12px 16px;margin:4px 0 10px 0;"
+            f"display:grid;grid-template-columns:1fr 1fr;gap:4px'>"
+            f"<div>"
+            f"<div style='color:#8b949e;font-size:0.72rem;letter-spacing:1.5px;"
+            f"text-transform:uppercase;font-family:monospace;margin-bottom:4px'>Tiempo ON</div>"
+            f"<div style='color:#e6edf3;font-size:1.1rem;font-weight:700;font-family:monospace;line-height:1'>"
+            f"{velocidad_porcentaje * 60 / 100:.0f}"
+            f"<span style='color:#8b949e;font-size:0.82rem;font-weight:400'> s / 60 s</span></div>"
+            f"</div>"
+            f"<div>"
+            f"<div style='color:#8b949e;font-size:0.72rem;letter-spacing:1.5px;"
+            f"text-transform:uppercase;font-family:monospace;margin-bottom:4px'>Vel. media</div>"
+            f"<div style='color:#3fb950;font-size:1.1rem;font-weight:700;font-family:monospace;line-height:1'>"
+            f"{velocidad_media:.2f}"
+            f"<span style='color:#8b949e;font-size:0.82rem;font-weight:400'> m/min</span></div>"
+            f"</div>"
             f"</div>",
             unsafe_allow_html=True,
         )
