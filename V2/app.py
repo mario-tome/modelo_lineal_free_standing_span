@@ -6,7 +6,6 @@ import streamlit as st
 from V2.logica.estado import get_sim, CLAVES_SIMULACION
 from V2.logica.constantes import get_defaults
 from V2.ui.estilos import CSS
-from V2.ui.teclado import manejar_teclado
 from V2.ui.sidebar import renderizar_sidebar
 from V2.ui.panel import panel_principal
 
@@ -25,11 +24,10 @@ for _k in CLAVES_SIMULACION:
         _sim[_k] = _defaults[_k]
 
 # Claves de la sesión de usuario (no pertenecen al estado de simulación compartido).
-_UI_DEFAULTS = {"k_vista_general": False, "tecla_reversa_activa": False, "es_operador": False}
+_UI_DEFAULTS = {"k_vista_general": False, "es_operador": False}
 for _k, _v in _UI_DEFAULTS.items():
     if _k not in st.session_state:
         st.session_state[_k] = _v
 
-manejar_teclado()
 renderizar_sidebar()
 panel_principal()

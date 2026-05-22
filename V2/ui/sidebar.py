@@ -84,10 +84,6 @@ def _renderizar_sidebar_observador(sim: SimState) -> None:
         )
 
     st.divider()
-    st.markdown("##### Teclado")
-    st.caption("Control exclusivo del operador")
-    _renderizar_referencia_teclado(activo=False)
-    st.divider()
 
 
 # ACCIONES DE CONTROL: iniciar, reiniciar, configurar GPS y caja Arduino, gestionar trayectoria GPS
@@ -151,25 +147,10 @@ def _limpiar_y_resetear() -> None:
     valores_iniciales = get_defaults()
     for clave in CLAVES_SIMULACION:
         sim[clave] = valores_iniciales[clave]
-    st.session_state["tecla_reversa_activa"] = False
-    st.session_state["es_operador"]          = False
+    st.session_state["es_operador"] = False
 
 
 # BLOQUES DE CONFIGURACIÓN DE CONEXIÓN GPS, CAJA ARDUINO Y TRAYECTORIA GPS OBJETIVO
-
-def _renderizar_referencia_teclado(activo: bool = True) -> None:
-    for tecla, desc in [
-        ("< (mantener)", "Ralentiza Cart"),
-        ("- (mantener)", "Ralentiza End-tower"),
-        ("R (pulsar)", "Marcha atrás / avance normal"),
-    ]:
-        color_tecla = "#e6edf3" if activo else "#484f58"
-        st.markdown(
-            f"<code style='background:#161b22;border:1px solid #30363d;border-radius:4px;"
-            f"padding:1px 6px;font-size:0.78rem;color:{color_tecla}'>{tecla}</code>"
-            f"<span style='color:#8b949e;font-size:0.78rem;margin-left:6px'>{desc}</span>",
-            unsafe_allow_html=True,
-        )
 
 
 def _renderizar_seccion_conexion_caja(numero_tramos: int, longitud_tramo: float,
@@ -495,7 +476,4 @@ def renderizar_sidebar():
                 _limpiar_y_resetear()
                 st.rerun()
 
-        st.divider()
-        st.markdown("##### Teclado (simulación activa)")
-        _renderizar_referencia_teclado(activo=True)
         st.divider()
