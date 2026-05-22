@@ -17,6 +17,15 @@ except ImportError:
 SIN_CAJA_PUERTO = "— Selecciona puerto —"
 
 
+def _seccion(titulo: str) -> None:
+    """Encabezado de sección del sidebar: blanco, legible, con peso visual claro."""
+    st.markdown(
+        f"<p style='color:#e6edf3;font-size:0.95rem;font-weight:600;"
+        f"margin:8px 0 2px 0;letter-spacing:0.3px'>{titulo}</p>",
+        unsafe_allow_html=True,
+    )
+
+
 # SIDEBAR PARA EL MODO OBSERVADOR (solo lectura)
 
 def _renderizar_sidebar_observador(sim: SimState) -> None:
@@ -37,7 +46,7 @@ def _renderizar_sidebar_observador(sim: SimState) -> None:
         return
 
     lineal = sim.lineal
-    st.markdown("##### Configuración activa")
+    _seccion("Configuración activa")
     col_iz, col_de = st.columns(2)
     col_iz.metric("N° tramos", lineal.numero_tramos)
     col_de.metric("Long. tramo", f"{lineal.longitud_tramo} m")
@@ -57,7 +66,7 @@ def _renderizar_sidebar_observador(sim: SimState) -> None:
     )
 
     st.divider()
-    st.markdown("##### Conexión")
+    _seccion("Conexión")
     if lineal.caja_interfaz:
         st.markdown("<span style='color:#e6edf3;font-size:0.85rem'>Caja de interfaz GPS — 2 Arduinos I2C (115 200 baud)</span>", unsafe_allow_html=True)
     else:
@@ -65,7 +74,7 @@ def _renderizar_sidebar_observador(sim: SimState) -> None:
 
     if sim.auto_reverse_activo:
         st.divider()
-        st.markdown("##### Auto-reverse")
+        _seccion("Auto-reverse")
         st.markdown(
             f"<span style='color:#e6edf3;font-size:0.85rem'>"
             f"Activo · {sim.limite_sur:.0f} m — {sim.limite_norte:.0f} m · "
@@ -75,7 +84,7 @@ def _renderizar_sidebar_observador(sim: SimState) -> None:
 
     if sim.trayectoria_activa and sim.trayectoria_puntos:
         st.divider()
-        st.markdown("##### Trayectoria objetivo GPS")
+        _seccion("Trayectoria objetivo GPS")
         numero_puntos = len(sim.trayectoria_puntos)
         st.markdown(
             f"<span style='color:#e6edf3;font-size:0.85rem'>"
@@ -315,7 +324,7 @@ def renderizar_sidebar():
         # Configuración del Lineal FSS
         st.caption("Configura tu Lineal FSS")
 
-        st.markdown("##### Geometría")
+        _seccion("Geometría")
         if bloqueado:
             st.markdown(
                 "<span style='color:#484f58;font-size:0.72rem'>Simulación activa — parámetros bloqueados</span>",
@@ -328,7 +337,7 @@ def renderizar_sidebar():
         velocidad_nominal = col_vnom.number_input("Vel. nominal (m/min)", 0.5, 10.0, 3.0, 0.5, disabled=bloqueado, key="k_vnom")
         longitud_campo = col_campo.number_input("Campo total (m)", 100, 5000,  800,  50, disabled=bloqueado, key="k_campo")
 
-        st.markdown("##### Panel speed")
+        _seccion("Panel speed")
         velocidad_porcentaje = st.slider(
             "Panel speed  (Duty cycle %)", 1, 100, 50,
             key="k_vpct", format="%d %%",
@@ -347,7 +356,7 @@ def renderizar_sidebar():
             unsafe_allow_html=True,
         )
 
-        st.markdown("##### Simulación")
+        _seccion("Simulación")
         segundos_por_refresco = st.slider(
             "Factor de escala temporal",
             1, 600, 60, key="k_simspd", format="x%d",
@@ -356,7 +365,7 @@ def renderizar_sidebar():
         st.caption(f"Cada refresco = **{segundos_por_refresco} s** simulados")
 
         st.divider()
-        st.markdown("##### Terreno")
+        _seccion("Terreno")
         terreno = st.selectbox(
             "Tipo de patinaje",
             options=list(TERRENOS.keys()), index=2,
@@ -375,7 +384,7 @@ def renderizar_sidebar():
             st.caption(f"Deriva acumulada estimada al final del campo: **±{deriva_estimada_cm:.0f} cm**")
 
         st.divider()
-        st.markdown("##### Auto-reverse")
+        _seccion("Auto-reverse")
         auto_reverse_activo = st.toggle(
             "Activar auto-reverse", key="k_auto_reverse",
             help="El lineal rebota automáticamente entre los límites configurados.",
@@ -391,7 +400,7 @@ def renderizar_sidebar():
             )
 
         st.divider()
-        st.markdown("##### Conexión externa")
+        _seccion("Conexión externa")
         st.radio(
             "Modo de conexión",
             options=["ninguno", "caja"],
@@ -410,7 +419,7 @@ def renderizar_sidebar():
 
         if modo_conexion == "caja":
             st.divider()
-            st.markdown("##### Ruido de posición simulado")
+            _seccion("Ruido de posición simulado")
             interferencia = st.slider(
                 "Desvío aleatorio por emisión (mm)",
                 min_value=0, max_value=15, value=0, step=1,
@@ -423,7 +432,7 @@ def renderizar_sidebar():
             )
 
         st.divider()
-        st.markdown("##### Trayectoria objetivo GPS")
+        _seccion("Trayectoria objetivo GPS")
         st.toggle("Activar trayectoria", key="k_tray_activa", help="Define puntos de guiado para la sección GPS. Se calcula error de distancia y rumbo.")
         _renderizar_seccion_trayectoria(bloqueado)
 
