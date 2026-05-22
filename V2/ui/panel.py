@@ -285,27 +285,6 @@ def _get_tramo_gps(lineal: Lineal) -> tuple[AntenaGPS | None, int]:
 
 # BLOQUES HTML REUTILIZABLES
 
-def _html_badge_en_marcha(en_marcha_atras: bool, auto_reverse_activo: bool, numero_inversiones: int) -> str:
-    color = "#ff7b72" if en_marcha_atras else "#3fb950"
-    fondo = "rgba(255,123,114,0.08)" if en_marcha_atras else "rgba(63,185,80,0.08)"
-    borde = "rgba(255,123,114,0.25)" if en_marcha_atras else "rgba(63,185,80,0.25)"
-    texto = "&#9660; MARCHA ATRÁS" if en_marcha_atras else "&#9650; EN MARCHA"
-    sufijo = (
-        f"&nbsp;<span style='color:#8b949e;font-weight:400;font-size:0.75rem;letter-spacing:1px'>"
-        f"AUTO-REVERSE · {numero_inversiones} inv.</span>"
-        if auto_reverse_activo else ""
-    )
-    return (
-        f"<div style='display:inline-flex;align-items:center;gap:8px;"
-        f"background:{fondo};border:1px solid {borde};"
-        f"border-radius:20px;padding:5px 14px;margin:4px 0'>"
-        f"<span style='width:8px;height:8px;border-radius:50%;background:{color};"
-        f"display:inline-block;box-shadow:0 0 6px {color}'></span>"
-        f"<span style='color:{color};font-weight:600;letter-spacing:2px;font-size:0.85rem'>"
-        f"{texto}</span>{sufijo}</div>"
-    )
-
-
 def _html_barra_progreso_auto_reverse(
     lineal: Lineal, limite_sur: float, limite_norte: float, numero_inversiones: int
 ) -> str:
@@ -433,64 +412,6 @@ def panel_principal():
     )
 
     # Insignia de estado
-    if not es_operador and sim.lineal is not None:
-        st.markdown(
-            "<div style='display:inline-flex;align-items:center;gap:8px;"
-            "background:rgba(88,166,255,0.08);border:1px solid rgba(88,166,255,0.25);"
-            "border-radius:20px;padding:5px 14px;margin:4px 0'>"
-            "<span style='width:8px;height:8px;border-radius:50%;background:#58a6ff;"
-            "display:inline-block'></span>"
-            "<span style='color:#58a6ff;font-weight:600;letter-spacing:1px;"
-            "font-size:0.85rem'>MODO OBSERVADOR — solo lectura</span>"
-            "</div>",
-            unsafe_allow_html=True,
-        )
-
-    if sim.completado:
-        st.markdown(
-            f"<div style='display:inline-flex;align-items:center;gap:10px;"
-            f"background:rgba(63,185,80,0.08);border:1px solid rgba(63,185,80,0.25);"
-            f"border-radius:20px;padding:6px 16px;margin:4px 0'>"
-            f"<span style='color:#3fb950;font-size:1rem'>✓</span>"
-            f"<span style='color:#3fb950;font-weight:600;letter-spacing:1px;font-size:0.85rem'>RIEGO COMPLETADO</span>"
-            f"<span style='color:#8b949e;font-size:0.8rem'>"
-            f"· {lineal._tiempo_formateado()} · {lineal.ciclo_actual} ciclos · {lineal.posicion_norte:.1f} m</span>"
-            f"</div>",
-            unsafe_allow_html=True,
-        )
-    elif sim.en_marcha:
-        st.markdown(
-            _html_badge_en_marcha(
-                lineal is not None and lineal.en_marcha_atras,
-                sim.auto_reverse_activo,
-                sim.numero_inversiones,
-            ),
-            unsafe_allow_html=True,
-        )
-    elif sim.pausado:
-        st.markdown(
-            "<div style='display:inline-flex;align-items:center;gap:8px;"
-            "background:rgba(227,179,65,0.08);border:1px solid rgba(227,179,65,0.25);"
-            "border-radius:20px;padding:5px 14px;margin:4px 0'>"
-            "<span style='width:8px;height:8px;border-radius:50%;background:#e3b341;"
-            "display:inline-block'></span>"
-            "<span style='color:#e3b341;font-weight:600;letter-spacing:2px;font-size:0.85rem'>PAUSADO</span>"
-            "</div>",
-            unsafe_allow_html=True,
-        )
-    else:
-        st.markdown(
-            "<div style='display:inline-flex;align-items:center;gap:8px;"
-            "background:rgba(139,148,158,0.06);border:1px solid #21262d;"
-            "border-radius:20px;padding:5px 14px;margin:4px 0'>"
-            "<span style='width:8px;height:8px;border-radius:50%;background:#484f58;"
-            "display:inline-block'></span>"
-            "<span style='color:#8b949e;letter-spacing:1px;font-size:0.85rem'>"
-            "Configura el lineal en el panel izquierdo y pulsa INICIAR</span>"
-            "</div>",
-            unsafe_allow_html=True,
-        )
-
     # Barra de progreso + Logs (lado a lado, misma altura) — visión de estado inmediata
     if lineal:
         col_progreso, col_registro = st.columns([7, 3])
