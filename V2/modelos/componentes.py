@@ -235,39 +235,51 @@ def _aplicar_interferencia_gps(lat_e7: int, lon_e7: int, interferencia_mm: float
     )
 
 
-class ReferenciaGPS:
+class AntenaGPS:
     """
-    Sensor GPS montado en un TramoIntermedio
-    Convierte la posición cartesiana del tramo a lat/lon y la emite por puerto serie cada segundo:
-    "LAT:<lat_e7>,LON:<lon_e7>\\n"
+    Antena GPS montada en un punto dentro de un tramo del lineal (no en una torre)
+    La posición se calcula usando las dos secciones del tramo según metros_desde_inicio
     """
 
-    def __init__(self, tramo: TramoIntermedio,
+    def __init__(self,
+                 seccion_inicio,
+                 seccion_fin,
+                 metros_desde_inicio: float,
                  lat_origen: float,
-                 lon_origen: float,
-                 puerto_serial: str = None,
-                 baudrate: int = 9600,
-                 verbose_consola: bool = False):
-
-        self.tramo = tramo
+                 lon_origen: float):
+        self.seccion_inicio = seccion_inicio
+        self.seccion_fin = seccion_fin
+        self.metros_desde_inicio = metros_desde_inicio
         self.lat_origen = lat_origen
         self.lon_origen = lon_origen
-        self.puerto_serial = puerto_serial
-        self.baudrate = baudrate
-        self.verbose_consola = verbose_consola
         self.interferencia_gps_mm: float = 0.0
 
-        self._hilo = None
-        self._activo = False
+    def _fraccion_en_tramo(self) -> float:
+        """Fracción entre 0.0 y 1.0 de la posición dentro del tramo según metros_desde_inicio"""
+        longitud_tramo = math.hypot(
+            self.seccion_fin.posicion_x - self.seccion_inicio.posicion_x,
+            self.seccion_fin.posicion_y - self.seccion_inicio.posicion_y,
+        )
+        return min(1.0, self.metros_desde_inicio / longitud_tramo) if longitud_tramo > 1e-6 else 0.0
+
+    @property
+    def posicion_x(self) -> float:
+        f = self._fraccion_en_tramo()
+        return self.seccion_inicio.posicion_x + f * (self.seccion_fin.posicion_x - self.seccion_inicio.posicion_x)
+
+    @property
+    def posicion_y(self) -> float:
+        f = self._fraccion_en_tramo()
+        return self.seccion_inicio.posicion_y + f * (self.seccion_fin.posicion_y - self.seccion_inicio.posicion_y)
 
     @property
     def latitud(self) -> float:
-        return self.lat_origen + (self.tramo.posicion_y / METROS_POR_GRADO_LAT)
+        return self.lat_origen + (self.posicion_y / METROS_POR_GRADO_LAT)
 
     @property
     def longitud(self) -> float:
         mpg_lon = METROS_POR_GRADO_LAT * math.cos(math.radians(self.lat_origen))
-        return self.lon_origen + (self.tramo.posicion_x / mpg_lon)
+        return self.lon_origen + (self.posicion_x / mpg_lon)
 
     @property
     def lat_e7(self) -> int:
@@ -277,51 +289,161 @@ class ReferenciaGPS:
     def lon_e7(self) -> int:
         return round(self.longitud * 1e7)
 
-    def iniciar_transmision_background(self):
-        """Lanza hilo que emite coordenadas 1 vez/segundo por USB o consola"""
-        if self.puerto_serial is None and not self.verbose_consola:
+
+def _aplicar_interferencia_cartesiana(x: float, y: float, interferencia_mm: float) -> tuple:
+    """Aplica error aleatorio RTK (±0–15 mm) a las coordenadas cartesianas en metros"""
+    if interferencia_mm == 0.0:
+        return x, y
+    dev_x = random.uniform(-interferencia_mm, interferencia_mm) / 1000.0
+    dev_y = random.uniform(-interferencia_mm, interferencia_mm) / 1000.0
+    return x + dev_x, y + dev_y
+
+
+class CajaInterfaz:
+    """
+    Caja de guiado con dos Arduinos independientes, comunicados entre sí por I2C
+    - Antena path: envía coordenadas al Arduino Path y recibe señales del Arduino
+    - Antena heading: envía coordenadas al Arduino Heading (sin respuesta al gemelo)
+    Modo "geo": envía Lat/Lon en formato ×10⁷  →  "Lat {lat_e7} Lon {lon_e7} Carr {carr}"
+    Modo "cartesiana": envía X/Y en milímetros  →  "X {x_mm} Y {y_mm} Carr {carr}"
+    """
+
+    BAUDRATE = 115_200
+
+    def __init__(self,
+                 antena_path: AntenaGPS,
+                 antena_heading: AntenaGPS,
+                 puerto_path: str,
+                 puerto_heading: str,
+                 carr: int = 2,
+                 modo_coordenadas: str = "geo"):
+
+        self.antena_path = antena_path
+        self.antena_heading = antena_heading
+        self.puerto_path = puerto_path
+        self.puerto_heading = puerto_heading
+        self.carr = carr
+        self.modo_coordenadas = modo_coordenadas
+
+        self.slow_down_cart: bool  = False
+        self.slow_down_end_tower: bool  = False
+        self.safety_ok: bool = True
+        self.gps_ok: bool = True
+        self.ultimo_mensaje: str = ""
+        self.interferencia_gps_mm: float = 0.0
+
+        self._activo = False
+        self._hilo = None
+
+    def iniciar(self):
+        """Abre los dos puertos serie y lanza el hilo de comunicación."""
+        if not _SERIAL_DISPONIBLE:
+            print("Pyserial no instalado; ejecuta: pip install pyserial")
             return
         if self._hilo is not None and self._hilo.is_alive():
             return
         self._activo = True
-        self._hilo = threading.Thread(target=self._bucle_transmision, daemon=True)
+        self._hilo = threading.Thread(target=self._bucle, daemon=True)
         self._hilo.start()
 
-    def detener_transmision_background(self):
+    def detener(self):
         self._activo = False
 
-    def _bucle_transmision(self):
-        conexion = None
-        if self.puerto_serial is not None:
-            try:
-                conexion = _serial_module.Serial(
-                    self.puerto_serial, self.baudrate,
-                    timeout=1, write_timeout=1,
-                    rtscts=False, dsrdtr=False, xonxoff=False,
-                )
-            except Exception as e:
-                print(f"ReferenciaGPS: error abriendo {self.puerto_serial}: {e}")
-                return
-
-        while self._activo:
-            lat_em, lon_em = _aplicar_interferencia_gps(
-                self.lat_e7, self.lon_e7,
-                self.interferencia_gps_mm, self.lat_origen,
+    def _bucle(self):
+        try:
+            ser_path = _serial_module.Serial(
+                self.puerto_path, self.BAUDRATE,
+                timeout=0.1, write_timeout=1,
+                rtscts=False, dsrdtr=False, xonxoff=False,
             )
-            msg = f"LAT:{lat_em},LON:{lon_em}\n"
-            if conexion is not None:
-                try:
-                    conexion.write(msg.encode("utf-8"))
-                    conexion.flush()
-                except Exception as e:
-                    print(f"ReferenciaGPS: error en transmisión: {e}")
-                    break
-            if self.verbose_consola:
-                print(f"GPS {msg.strip()}  (real: {self.latitud:.7f}°, {self.longitud:.7f}°)")
-            _time.sleep(1.0)
+        except Exception as e:
+            print(f"CajaInterfaz: no se pudo abrir puerto path {self.puerto_path}: {e}")
+            return
 
-        if conexion is not None:
-            conexion.close()
+        ser_heading = None
+        try:
+            ser_heading = _serial_module.Serial(
+                self.puerto_heading, self.BAUDRATE,
+                timeout=0.1, write_timeout=1,
+                rtscts=False, dsrdtr=False, xonxoff=False,
+            )
+        except Exception as e:
+            print(f"CajaInterfaz: advertencia — no se pudo abrir puerto heading {self.puerto_heading}: {e}")
+
+        ultimo_envio = 0.0
+        while self._activo:
+            ahora = _time.time()
+
+            if ahora - ultimo_envio >= 1.0:
+                msg_path, msg_heading = self._formatear_mensajes()
+                try:
+                    ser_path.write(msg_path.encode("utf-8"))
+                    ser_path.flush()
+                    ultimo_envio = ahora
+                except Exception as e:
+                    print(f"CajaInterfaz: error enviando path GPS: {e}")
+                    break
+                if ser_heading is not None:
+                    try:
+                        ser_heading.write(msg_heading.encode("utf-8"))
+                        ser_heading.flush()
+                    except Exception as e:
+                        print(f"CajaInterfaz: error enviando heading GPS: {e}")
+
+            try:
+                linea = ser_path.readline().decode("utf-8", errors="replace").strip()
+                if linea:
+                    self.ultimo_mensaje = linea
+                    self._procesar(linea)
+            except Exception as e:
+                if self._activo:
+                    print(f"CajaInterfaz: error leyendo path: {e}")
+                break
+
+        ser_path.close()
+        if ser_heading is not None:
+            ser_heading.close()
+
+    def _formatear_mensajes(self) -> tuple[str, str]:
+        """Devuelve los mensajes de path y heading según el modo de coordenadas configurado"""
+        if self.modo_coordenadas == "cartesiana":
+            x_p, y_p = _aplicar_interferencia_cartesiana(
+                self.antena_path.posicion_x, self.antena_path.posicion_y,
+                self.interferencia_gps_mm,
+            )
+            x_h, y_h = _aplicar_interferencia_cartesiana(
+                self.antena_heading.posicion_x, self.antena_heading.posicion_y,
+                self.interferencia_gps_mm,
+            )
+            return (
+                f"X {round(x_p * 1000)} Y {round(y_p * 1000)} Carr {self.carr}\n",
+                f"X {round(x_h * 1000)} Y {round(y_h * 1000)} Carr {self.carr}\n",
+            )
+
+        # modo "geo" (por defecto): coordenadas geográficas ×10⁷
+        lat_p, lon_p = _aplicar_interferencia_gps(
+            self.antena_path.lat_e7, self.antena_path.lon_e7,
+            self.interferencia_gps_mm, self.antena_path.lat_origen,
+        )
+        lat_h, lon_h = _aplicar_interferencia_gps(
+            self.antena_heading.lat_e7, self.antena_heading.lon_e7,
+            self.interferencia_gps_mm, self.antena_heading.lat_origen,
+        )
+        return (
+            f"Lat {lat_p} Lon {lon_p} Carr {self.carr}\n",
+            f"Lat {lat_h} Lon {lon_h} Carr {self.carr}\n",
+        )
+
+    def _procesar(self, msg: str):
+        """Actualiza los estados de guiado según los mensajes del Arduino Path"""
+        if msg == "SLOW_DOWN_CART_ON": self.slow_down_cart = True
+        elif msg == "SLOW_DOWN_CART_OFF": self.slow_down_cart = False
+        elif msg == "SLOW_DOWN_END_TOWER_ON":  self.slow_down_end_tower = True
+        elif msg == "SLOW_DOWN_END_TOWER_OFF": self.slow_down_end_tower = False
+        elif msg == "SAFETY_OK": self.safety_ok = True
+        elif msg == "SAFETY_FAIL": self.safety_ok = False
+        elif msg == "GPS_OK":  self.gps_ok = True
+        elif msg == "GPS_FAIL": self.gps_ok = False
 
 
 class Centro:
@@ -344,119 +466,3 @@ class TramoCorner:
         self.angulo_giro = angulo_giro
 
 
-class CajaInterfaz:
-    """
-    Comunicación bidireccional con la caja de interfaz Arduino (115 200 baud)
-    PC → Arduino (1 Hz): "Lat {lat_e7} Lon {lon_e7} Carr {carr}\\n"
-    Arduino → PC:
-        SLOW_DOWN_CART_ON/OFF | SLOW_DOWN_END_TOWER_ON/OFF
-        SAFETY_OK / SAFETY_FAIL
-        PS_OK / GPS_FAIL
-    carr: calidad RTK  0 = sin RTK  1 = float  2 = FIX
-    """
-
-    BAUDRATE = 115_200
-
-    def __init__(self, tramo: TramoIntermedio,
-                 lat_origen: float,
-                 lon_origen: float,
-                 puerto_serial: str,
-                 carr: int = 2):
-
-        self.tramo = tramo
-        self.lat_origen = lat_origen
-        self.lon_origen = lon_origen
-        self.puerto_serial = puerto_serial
-        self.carr = carr
-
-        self.slow_down_cart: bool = False
-        self.slow_down_end_tower: bool = False
-        self.safety_ok: bool = True
-        self.gps_ok: bool = True
-        self.ultimo_mensaje: str = ""
-        self.interferencia_gps_mm: float = 0.0
-
-        self._activo = False
-        self._hilo = None
-
-    @property
-    def latitud(self) -> float:
-        return self.lat_origen + (self.tramo.posicion_y / METROS_POR_GRADO_LAT)
-
-    @property
-    def longitud(self) -> float:
-        mpg_lon = METROS_POR_GRADO_LAT * math.cos(math.radians(self.lat_origen))
-        return self.lon_origen + (self.tramo.posicion_x / mpg_lon)
-
-    @property
-    def lat_e7(self) -> int:
-        return round(self.latitud * 1e7)
-
-    @property
-    def lon_e7(self) -> int:
-        return round(self.longitud * 1e7)
-
-    def iniciar(self):
-        """Abre el puerto serie y lanza el hilo de comunicación bidireccional"""
-        if not _SERIAL_DISPONIBLE:
-            print("Pyserial no instalado; ejecuta: pip install pyserial")
-            return
-        if self._hilo is not None and self._hilo.is_alive():
-            return
-        self._activo = True
-        self._hilo = threading.Thread(target=self._bucle, daemon=True)
-        self._hilo.start()
-
-    def detener(self):
-        self._activo = False
-
-    def _bucle(self):
-        try:
-            ser = _serial_module.Serial(
-                self.puerto_serial, self.BAUDRATE,
-                timeout=0.1, write_timeout=1,
-                rtscts=False, dsrdtr=False, xonxoff=False,
-            )
-        except Exception as e:
-            print(f"CajaInterfaz: no se pudo abrir {self.puerto_serial}: {e}")
-            return
-
-        ultimo_envio = 0.0
-        while self._activo:
-            ahora = _time.time()
-            if ahora - ultimo_envio >= 1.0:
-                lat_em, lon_em = _aplicar_interferencia_gps(
-                    self.lat_e7, self.lon_e7,
-                    self.interferencia_gps_mm, self.lat_origen,
-                )
-                trama = f"Lat {lat_em} Lon {lon_em} Carr {self.carr}\n"
-                try:
-                    ser.write(trama.encode("utf-8"))
-                    ser.flush()
-                    ultimo_envio = ahora
-                except Exception as e:
-                    print(f"CajaInterfaz: error enviando GPS: {e}")
-                    break
-
-            try:
-                linea = ser.readline().decode("utf-8", errors="replace").strip()
-                if linea:
-                    self.ultimo_mensaje = linea
-                    self._procesar(linea)
-            except Exception as e:
-                if self._activo:
-                    print(f"CajaInterfaz: error leyendo: {e}")
-                break
-
-        ser.close()
-
-    def _procesar(self, msg: str):
-        """Actualiza estados internos según el mensaje recibido del Arduino."""
-        if   msg == "SLOW_DOWN_CART_ON": self.slow_down_cart = True
-        elif msg == "SLOW_DOWN_CART_OFF": self.slow_down_cart = False
-        elif msg == "SLOW_DOWN_END_TOWER_ON":  self.slow_down_end_tower = True
-        elif msg == "SLOW_DOWN_END_TOWER_OFF": self.slow_down_end_tower = False
-        elif msg == "SAFETY_OK": self.safety_ok = True
-        elif msg == "SAFETY_FAIL": self.safety_ok = False
-        elif msg == "GPS_OK": self.gps_ok = True
-        elif msg == "GPS_FAIL": self.gps_ok = False

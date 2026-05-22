@@ -23,11 +23,9 @@ def get_defaults() -> dict:
         # Registro de eventos
         "registro": [],
 
-        # Históricos de posición y GPS
+        # Histórico de posiciones para trayectoria
         "historial_posiciones": [],
-        "historial_gps": [],
         "rastros_secciones": None,
-        "coordenadas_gps_previas": None,
 
         # Métricas en tiempo real
         "velocidad_real": 0.0,

@@ -5,16 +5,10 @@ from V2.modelos import METROS_POR_GRADO_LAT
 
 def get_origen_latlon() -> tuple:
     """Latitud y longitud de origen según el modo de conexión activo"""
-    modo = st.session_state.get("k_conexion_modo", "ninguno")
-    if modo == "caja":
+    if st.session_state.get("k_conexion_modo") == "caja":
         return (
             st.session_state.get("k_caja_lat_e7", 404168000) / 1e7,
             st.session_state.get("k_caja_lon_e7", -37038000) / 1e7,
-        )
-    if modo == "gps":
-        return (
-            st.session_state.get("k_gps_lat_e7", 404168000) / 1e7,
-            st.session_state.get("k_gps_lon_e7", -37038000) / 1e7,
         )
     return (40.4168, -3.7038)
 
