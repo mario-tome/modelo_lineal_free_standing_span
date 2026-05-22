@@ -28,6 +28,19 @@ def _seccion(titulo: str) -> None:
 
 # SIDEBAR PARA EL MODO OBSERVADOR (solo lectura)
 
+def _punto_estado(etiqueta: str, activo: bool, color_activo: str, color_inactivo: str = "#484f58") -> str:
+    """Fila de estado con punto de color: · Safety OK · GPS FAIL etc."""
+    color = color_activo if activo else color_inactivo
+    return (
+        f"<div style='display:flex;align-items:center;gap:6px;margin:3px 0'>"
+        f"<span style='width:7px;height:7px;border-radius:50%;background:{color};"
+        f"flex-shrink:0'></span>"
+        f"<span style='color:{color};font-size:0.82rem;font-family:monospace;font-weight:600'>"
+        f"{etiqueta}</span>"
+        f"</div>"
+    )
+
+
 def _renderizar_sidebar_observador(sim: SimState) -> None:
     st.markdown(
         "<div style='display:inline-flex;align-items:center;gap:8px;"
@@ -46,12 +59,16 @@ def _renderizar_sidebar_observador(sim: SimState) -> None:
         return
 
     lineal = sim.lineal
-    _seccion("Configuración activa")
-    col_iz, col_de = st.columns(2)
-    col_iz.metric("N° tramos", lineal.numero_tramos)
-    col_de.metric("Long. tramo", f"{lineal.longitud_tramo} m")
-    col_iz.metric("Vel. nominal", f"{lineal.velocidad_nominal} m/min")
-    col_de.metric("Campo total", f"{sim.longitud_campo} m")
+
+    # Configuración del lineal en marcha
+    _seccion("Lineal activo")
+    longitud_total = lineal.numero_tramos * lineal.longitud_tramo
+    st.markdown(
+        f"<p style='color:#e6edf3;font-size:0.88rem;margin:2px 0 8px 0'>"
+        f"{lineal.numero_tramos} tramos · {lineal.longitud_tramo} m/tramo · "
+        f"<b>{longitud_total} m</b> totales</p>",
+        unsafe_allow_html=True,
+    )
 
     velocidad_media = lineal.velocidad_nominal * lineal.velocidad_porcentaje / 100.0
     st.markdown(
@@ -76,30 +93,90 @@ def _renderizar_sidebar_observador(sim: SimState) -> None:
         unsafe_allow_html=True,
     )
 
+    # Conexión GPS: tramo, formato y estado en tiempo real
     st.divider()
-    _seccion("Conexión")
-    if lineal.caja_interfaz:
-        st.markdown("<span style='color:#e6edf3;font-size:0.85rem'>Caja de interfaz GPS — 2 Arduinos I2C (115 200 baud)</span>", unsafe_allow_html=True)
-    else:
-        st.markdown("<span style='color:#8b949e;font-size:0.85rem'>Sin conexión externa</span>", unsafe_allow_html=True)
+    _seccion("Conexión GPS")
 
+    if lineal.caja_interfaz:
+        caja = lineal.caja_interfaz
+
+        try:
+            indice_tramo = lineal.secciones.index(caja.antena_path.seccion_inicio)
+            etiqueta_tramo = f"Tramo {indice_tramo + 1}  (secciones {indice_tramo} → {indice_tramo + 1})"
+        except ValueError:
+            etiqueta_tramo = "Tramo —"
+
+        nombre_formato = "Geográfico  (Lat/Lon ×10⁷)" if caja.modo_coordenadas == "geo" else "Cartesiano  (X/Y mm)"
+
+        st.markdown(
+            f"<p style='color:#e6edf3;font-size:0.85rem;margin:4px 0 2px 0'>{etiqueta_tramo}</p>"
+            f"<p style='color:#8b949e;font-size:0.80rem;margin:0 0 8px 0'>{nombre_formato}</p>",
+            unsafe_allow_html=True,
+        )
+
+        col_izq, col_der = st.columns(2)
+        with col_izq:
+            st.markdown(_punto_estado("Safety OK",  caja.safety_ok,           "#3fb950", "#f85149"), unsafe_allow_html=True)
+            st.markdown(_punto_estado("Slow Cart",  caja.slow_down_cart,      "#ffa657"), unsafe_allow_html=True)
+        with col_der:
+            st.markdown(_punto_estado("GPS OK",     caja.gps_ok,              "#3fb950", "#f85149"), unsafe_allow_html=True)
+            st.markdown(_punto_estado("Slow EndT",  caja.slow_down_end_tower, "#ffa657"), unsafe_allow_html=True)
+    else:
+        st.markdown(
+            "<p style='color:#8b949e;font-size:0.85rem;margin:4px 0'>Sin conexión externa</p>",
+            unsafe_allow_html=True,
+        )
+
+    # Trayectoria: error de distancia y rumbo en tiempo real
+    if sim.trayectoria_activa and sim.trayectoria_puntos:
+        st.divider()
+        _seccion("Trayectoria objetivo")
+
+        numero_puntos = len(sim.trayectoria_puntos)
+        texto_distancia = f"{sim.error_distancia_mm:.0f} mm" if sim.error_distancia_mm is not None else "—"
+        texto_rumbo     = f"{sim.error_rumbo_grados:+.1f}°"  if sim.error_rumbo_grados  is not None else "—"
+
+        st.markdown(
+            f"<p style='color:#8b949e;font-size:0.80rem;margin:4px 0 8px 0'>"
+            f"{numero_puntos} puntos · {numero_puntos - 1} segmentos</p>"
+            f"<div style='background:#161b22;border:1px solid #30363d;border-radius:10px;"
+            f"padding:12px 16px;display:grid;grid-template-columns:1fr 1fr;gap:4px'>"
+            f"<div>"
+            f"<div style='color:#8b949e;font-size:0.72rem;letter-spacing:1.5px;"
+            f"text-transform:uppercase;font-family:monospace;margin-bottom:4px'>Error dist.</div>"
+            f"<div style='color:#e6edf3;font-size:1.1rem;font-weight:700;font-family:monospace;line-height:1'>"
+            f"{texto_distancia}</div>"
+            f"</div>"
+            f"<div>"
+            f"<div style='color:#8b949e;font-size:0.72rem;letter-spacing:1.5px;"
+            f"text-transform:uppercase;font-family:monospace;margin-bottom:4px'>Error rumbo</div>"
+            f"<div style='color:#e6edf3;font-size:1.1rem;font-weight:700;font-family:monospace;line-height:1'>"
+            f"{texto_rumbo}</div>"
+            f"</div>"
+            f"</div>",
+            unsafe_allow_html=True,
+        )
+
+    # Auto-reverse
     if sim.auto_reverse_activo:
         st.divider()
         _seccion("Auto-reverse")
         st.markdown(
-            f"<span style='color:#e6edf3;font-size:0.85rem'>"
-            f"Activo · {sim.limite_sur:.0f} m — {sim.limite_norte:.0f} m · "
-            f"<b>{sim.numero_inversiones}</b> inversiones</span>",
-            unsafe_allow_html=True,
-        )
-
-    if sim.trayectoria_activa and sim.trayectoria_puntos:
-        st.divider()
-        _seccion("Trayectoria objetivo GPS")
-        numero_puntos = len(sim.trayectoria_puntos)
-        st.markdown(
-            f"<span style='color:#e6edf3;font-size:0.85rem'>"
-            f"Activa · {numero_puntos} puntos · {numero_puntos - 1} segmentos</span>",
+            f"<div style='background:#161b22;border:1px solid #30363d;border-radius:10px;"
+            f"padding:12px 16px;display:grid;grid-template-columns:1fr 1fr;gap:4px'>"
+            f"<div>"
+            f"<div style='color:#8b949e;font-size:0.72rem;letter-spacing:1.5px;"
+            f"text-transform:uppercase;font-family:monospace;margin-bottom:4px'>Rango</div>"
+            f"<div style='color:#e6edf3;font-size:0.92rem;font-weight:600;font-family:monospace'>"
+            f"{sim.limite_sur:.0f} — {sim.limite_norte:.0f} m</div>"
+            f"</div>"
+            f"<div>"
+            f"<div style='color:#8b949e;font-size:0.72rem;letter-spacing:1.5px;"
+            f"text-transform:uppercase;font-family:monospace;margin-bottom:4px'>Inversiones</div>"
+            f"<div style='color:#e6edf3;font-size:1.1rem;font-weight:700;font-family:monospace;line-height:1'>"
+            f"{sim.numero_inversiones}</div>"
+            f"</div>"
+            f"</div>",
             unsafe_allow_html=True,
         )
 
