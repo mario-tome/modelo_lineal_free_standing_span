@@ -487,6 +487,24 @@ def panel_principal():
             unsafe_allow_html=True,
         )
 
+    # Barra de progreso + Logs (lado a lado, misma altura) — visión de estado inmediata
+    if lineal:
+        col_progreso, col_registro = st.columns([7, 3])
+        with col_progreso:
+            if sim.auto_reverse_activo:
+                st.markdown(
+                    _html_barra_progreso_auto_reverse(lineal, sim.limite_sur, sim.limite_norte, sim.numero_inversiones),
+                    unsafe_allow_html=True,
+                )
+            else:
+                st.markdown(
+                    _html_barra_progreso_lineal(lineal.posicion_norte, longitud_campo),
+                    unsafe_allow_html=True,
+                )
+        with col_registro:
+            if sim.registro:
+                st.markdown(_html_registro(sim.registro), unsafe_allow_html=True)
+
     # Métricas principales
     columnas_metricas = st.columns(10)
     if lineal:
@@ -515,25 +533,7 @@ def panel_principal():
         for columna in columnas_metricas:
             columna.metric("—", "—")
 
-    # Barra de progreso + Registro de eventos (lado a lado, misma altura)
-    if lineal:
-        col_progreso, col_registro = st.columns([7, 3])
-        with col_progreso:
-            if sim.auto_reverse_activo:
-                st.markdown(
-                    _html_barra_progreso_auto_reverse(lineal, sim.limite_sur, sim.limite_norte, sim.numero_inversiones),
-                    unsafe_allow_html=True,
-                )
-            else:
-                st.markdown(
-                    _html_barra_progreso_lineal(lineal.posicion_norte, longitud_campo),
-                    unsafe_allow_html=True,
-                )
-        with col_registro:
-            if sim.registro:
-                st.markdown(_html_registro(sim.registro), unsafe_allow_html=True)
-
-    # Métricas caja de interfaz GPS
+    # Métricas caja de interfaz GPS (se añaden al bloque de detalle cuando hay conexión)
     if lineal and lineal.caja_interfaz:
         caja = lineal.caja_interfaz
         color_safety = "#3fb950" if caja.safety_ok else "#f85149"
