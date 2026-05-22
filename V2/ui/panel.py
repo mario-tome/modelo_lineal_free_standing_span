@@ -316,7 +316,8 @@ def _html_barra_progreso_auto_reverse(
     simbolo = "▼" if lineal.en_marcha_atras else "▲"
     return (
         f"<div style='background:#161b22;border:1px solid #30363d;border-radius:10px;"
-        f"padding:14px 20px 10px 20px;margin:8px 0 16px 0'>"
+        f"padding:14px 20px 10px 20px;margin:8px 0 16px 0;"
+        f"height:130px;box-sizing:border-box'>"
         f"<div style='display:flex;justify-content:space-between;align-items:baseline;margin-bottom:10px'>"
         f"<span style='color:#8b949e;font-size:0.72rem;letter-spacing:2px;text-transform:uppercase;font-family:monospace'>"
         f"Auto-reverse  ·  {limite_sur:.0f} m — {limite_norte:.0f} m</span>"
@@ -339,7 +340,8 @@ def _html_barra_progreso_lineal(posicion_norte: float, longitud_campo: float) ->
     porcentaje = min(posicion_norte / longitud_campo * 100.0, 100.0)
     return (
         f"<div style='background:#161b22;border:1px solid #30363d;border-radius:10px;"
-        f"padding:14px 20px 10px 20px;margin:8px 0 16px 0'>"
+        f"padding:14px 20px 10px 20px;margin:8px 0 16px 0;"
+        f"height:130px;box-sizing:border-box'>"
         f"<div style='display:flex;justify-content:space-between;align-items:baseline;margin-bottom:10px'>"
         f"<span style='color:#8b949e;font-size:0.72rem;letter-spacing:2px;text-transform:uppercase;font-family:monospace'>Recorrido del campo</span>"
         f"<span style='color:#e6edf3;font-size:1.5rem;font-weight:700;font-family:monospace;line-height:1'>"
@@ -352,6 +354,52 @@ def _html_barra_progreso_lineal(posicion_norte: float, longitud_campo: float) ->
         f"<span style='color:#3fb950;font-size:0.82rem;font-weight:600;font-family:monospace'>{posicion_norte:.1f} m avanzados</span>"
         f"<span style='color:#484f58;font-size:0.82rem;font-family:monospace'>meta {longitud_campo:.0f} m</span>"
         f"</div></div>"
+    )
+
+
+_COLORES_REGISTRO = {
+    "START": "#3fb950", "STOP": "#e3b341", "FIN": "#3fb950",
+    "CRIT":  "#f85149", "OK":   "#58a6ff", "INFO": "#8b949e",
+}
+_MAX_ENTRADAS_VISIBLES = 500
+
+
+def _html_registro(registro: list) -> str:
+    """
+    Panel de log con scroll fijo — mismo estilo visual que las barras de progreso.
+    Entradas ilimitadas en memoria; muestra las últimas _MAX_ENTRADAS_VISIBLES más recientes arriba.
+    Un único st.markdown() por rerun → O(1) sin importar el volumen.
+    """
+    total = len(registro)
+    entradas = registro[-_MAX_ENTRADAS_VISIBLES:][::-1]
+    pie = f"{total}" if total <= _MAX_ENTRADAS_VISIBLES else f"{_MAX_ENTRADAS_VISIBLES} / {total}"
+
+    filas = "".join(
+        f"<div style='padding:4px 0;border-bottom:1px solid #21262d;white-space:nowrap;"
+        f"overflow:hidden;text-overflow:ellipsis'>"
+        f"<code style='color:#484f58;font-size:0.78rem'>{e['t']}</code>&nbsp;"
+        f"<span style='background:{_COLORES_REGISTRO.get(e['tipo'], '#8b949e')}22;"
+        f"color:{_COLORES_REGISTRO.get(e['tipo'], '#8b949e')};"
+        f"border-radius:3px;padding:1px 6px;font-size:0.74rem;font-family:monospace;font-weight:700'>"
+        f"{e['tipo']}</span>&nbsp;"
+        f"<span style='color:#e6edf3;font-size:0.88rem'>{e['msg']}</span>"
+        f"</div>"
+        for e in entradas
+    )
+
+    return (
+        f"<div style='background:#161b22;border:1px solid #30363d;border-radius:10px;"
+        f"padding:14px 20px 10px 20px;margin:8px 0 16px 0;"
+        f"height:130px;box-sizing:border-box'>"
+        f"<div style='display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px'>"
+        f"<span style='color:#8b949e;font-size:0.72rem;letter-spacing:2px;"
+        f"text-transform:uppercase;font-family:monospace'>Registro</span>"
+        f"<span style='color:#484f58;font-size:0.78rem;font-family:monospace'>{pie}</span>"
+        f"</div>"
+        f"<div style='height:80px;overflow-y:auto'>"
+        f"{filas}"
+        f"</div>"
+        f"</div>"
     )
 
 
@@ -467,18 +515,23 @@ def panel_principal():
         for columna in columnas_metricas:
             columna.metric("—", "—")
 
-    # Barra de progreso
+    # Barra de progreso + Registro de eventos (lado a lado, misma altura)
     if lineal:
-        if sim.auto_reverse_activo:
-            st.markdown(
-                _html_barra_progreso_auto_reverse(lineal, sim.limite_sur, sim.limite_norte, sim.numero_inversiones),
-                unsafe_allow_html=True,
-            )
-        else:
-            st.markdown(
-                _html_barra_progreso_lineal(lineal.posicion_norte, longitud_campo),
-                unsafe_allow_html=True,
-            )
+        col_progreso, col_registro = st.columns([7, 3])
+        with col_progreso:
+            if sim.auto_reverse_activo:
+                st.markdown(
+                    _html_barra_progreso_auto_reverse(lineal, sim.limite_sur, sim.limite_norte, sim.numero_inversiones),
+                    unsafe_allow_html=True,
+                )
+            else:
+                st.markdown(
+                    _html_barra_progreso_lineal(lineal.posicion_norte, longitud_campo),
+                    unsafe_allow_html=True,
+                )
+        with col_registro:
+            if sim.registro:
+                st.markdown(_html_registro(sim.registro), unsafe_allow_html=True)
 
     # Métricas caja de interfaz GPS
     if lineal and lineal.caja_interfaz:
@@ -521,13 +574,13 @@ def panel_principal():
             unsafe_allow_html=True,
         )
 
-    # Barra de herramientas: toggle, errores, log, CSV, GPS track
+    # Barra de herramientas: toggle, errores, CSV
     trayectoria_visible = sim.trayectoria_activa or st.session_state.get("k_tray_activa", False)
 
     if trayectoria_visible:
-        col_toggle, col_error_dist, col_error_rumbo, col_log, col_csv, _esp = st.columns([1, 1, 1, 3, 1, 3])
+        col_toggle, col_error_dist, col_error_rumbo, col_csv, _esp = st.columns([1, 1, 1, 1, 6])
     else:
-        col_toggle, col_log, col_csv, _esp = st.columns([1, 3, 1, 4])
+        col_toggle, col_csv, _esp = st.columns([1, 1, 7])
         col_error_dist = col_error_rumbo = None
 
     with col_toggle:
@@ -550,25 +603,6 @@ def panel_principal():
                         label="⬇ CSV", data=archivo_csv.read(),
                         file_name=os.path.basename(sim.csv_ruta),
                         mime="text/csv", width="stretch",
-                    )
-
-        with col_log:
-            if len(sim.registro) > 1_000:
-                sim.registro = sim.registro[-1_000:]
-            colores_tipo = {
-                "START": "#3fb950", "STOP": "#e3b341", "FIN": "#3fb950",
-                "CRIT": "#f85149", "OK": "#58a6ff", "INFO": "#8b949e",
-            }
-            with st.expander(f"Registro  ({len(sim.registro)} entradas)", expanded=False):
-                for entrada in sim.registro[-60:][::-1]:
-                    color = colores_tipo.get(entrada["tipo"], "#8b949e")
-                    st.markdown(
-                        f"<code style='color:#484f58;font-size:0.75rem'>{entrada['t']}</code>&nbsp;"
-                        f"<span style='background:{color}22;color:{color};border-radius:4px;"
-                        f"padding:1px 7px;font-size:0.68rem;font-family:monospace;font-weight:700'>"
-                        f"{entrada['tipo']}</span>&nbsp;"
-                        f"<span style='color:#e6edf3;font-size:0.82rem'>{entrada['msg']}</span>",
-                        unsafe_allow_html=True,
                     )
 
 
