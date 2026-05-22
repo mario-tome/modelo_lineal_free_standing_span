@@ -292,7 +292,12 @@ def _renderizar_seccion_trayectoria(bloqueado: bool) -> None:
 
 def renderizar_sidebar():
     with st.sidebar:
-        st.markdown("## Gemelo Digital")
+        st.markdown(
+            "<p style='color:#e6edf3;font-size:1.45rem;font-weight:700;"
+            "margin:4px 0 6px 0;letter-spacing:-0.2px'>"
+            "Gemelo <span style='color:#3fb950'>Digital</span></p>",
+            unsafe_allow_html=True,
+        )
 
         sim = get_sim()
         state = st.session_state
@@ -322,7 +327,11 @@ def renderizar_sidebar():
             return
 
         # Configuración del Lineal FSS
-        st.caption("Configura tu Lineal FSS")
+        st.markdown(
+            "<p style='color:#e6edf3;font-size:1.0rem;font-weight:400;margin:0 0 12px 0'>"
+            "Configura tu Lineal FSS</p>",
+            unsafe_allow_html=True,
+        )
 
         _seccion("Geometría")
         if bloqueado:

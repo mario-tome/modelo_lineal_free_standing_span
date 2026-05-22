@@ -426,7 +426,11 @@ def panel_principal():
         _avanzar_simulacion(sim)
         lineal = sim.lineal
 
-    st.markdown("# Gemelo Digital — Lineal FSS")
+    st.markdown(
+        "<h1 style='font-size:2rem;margin:0 0 6px 0'>GEMELO DIGITAL "
+        "<span style='color:#3fb950'>LINEAL FSS</span></h1>",
+        unsafe_allow_html=True,
+    )
 
     # Insignia de estado
     if not es_operador and sim.lineal is not None:
