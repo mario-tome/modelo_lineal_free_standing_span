@@ -434,5 +434,6 @@ def build_figure(lineal: Lineal | None, longitud_campo: float,
         # uirevision constante: Plotly.react actualiza anotaciones (texto + posición)
         # en cada re-render del fragmento sin resetear el zoom/pan del usuario
         uirevision="lineal_v2",
+        transition=dict(duration=800, easing="linear"),
     )
     return fig

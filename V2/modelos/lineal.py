@@ -131,10 +131,12 @@ class Lineal:
                      lon_origen: float,
                      puerto_path: str,
                      puerto_heading: str,
-                     carr: int = 2):
+                     carr: int = 2,
+                     modo_coordenadas: str = "geo"):
         """
         Configura la caja de guiado con los dos GPS en el tramo indicado
         metros_path / metros_heading: distancia desde el inicio del tramo donde va cada antena
+        modo_coordenadas: "geo" → Lat/Lon ×10⁷  |  "cartesiana" → X/Y en milímetros
         """
         if not (0 <= indice_tramo < self.numero_tramos):
             raise ValueError(f"indice_tramo debe estar entre 0 y {self.numero_tramos - 1}")
@@ -146,6 +148,7 @@ class Lineal:
             puerto_path = puerto_path,
             puerto_heading = puerto_heading,
             carr = carr,
+            modo_coordenadas = modo_coordenadas,
         )
 
     def avanza(self, segundos: int = 1):

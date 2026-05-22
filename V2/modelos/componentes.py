@@ -290,11 +290,22 @@ class AntenaGPS:
         return round(self.longitud * 1e7)
 
 
+def _aplicar_interferencia_cartesiana(x: float, y: float, interferencia_mm: float) -> tuple:
+    """Aplica error aleatorio RTK (±0–15 mm) a las coordenadas cartesianas en metros"""
+    if interferencia_mm == 0.0:
+        return x, y
+    dev_x = random.uniform(-interferencia_mm, interferencia_mm) / 1000.0
+    dev_y = random.uniform(-interferencia_mm, interferencia_mm) / 1000.0
+    return x + dev_x, y + dev_y
+
+
 class CajaInterfaz:
     """
     Caja de guiado con dos Arduinos independientes, comunicados entre sí por I2C
     - Antena path: envía coordenadas al Arduino Path y recibe señales del Arduino
     - Antena heading: envía coordenadas al Arduino Heading (sin respuesta al gemelo)
+    Modo "geo": envía Lat/Lon en formato ×10⁷  →  "Lat {lat_e7} Lon {lon_e7} Carr {carr}"
+    Modo "cartesiana": envía X/Y en milímetros  →  "X {x_mm} Y {y_mm} Carr {carr}"
     """
 
     BAUDRATE = 115_200
@@ -304,13 +315,15 @@ class CajaInterfaz:
                  antena_heading: AntenaGPS,
                  puerto_path: str,
                  puerto_heading: str,
-                 carr: int = 2):
+                 carr: int = 2,
+                 modo_coordenadas: str = "geo"):
 
         self.antena_path = antena_path
         self.antena_heading = antena_heading
         self.puerto_path = puerto_path
         self.puerto_heading = puerto_heading
         self.carr = carr
+        self.modo_coordenadas = modo_coordenadas
 
         self.slow_down_cart: bool  = False
         self.slow_down_end_tower: bool  = False
@@ -362,16 +375,9 @@ class CajaInterfaz:
             ahora = _time.time()
 
             if ahora - ultimo_envio >= 1.0:
-                lat_p, lon_p = _aplicar_interferencia_gps(
-                    self.antena_path.lat_e7, self.antena_path.lon_e7,
-                    self.interferencia_gps_mm, self.antena_path.lat_origen,
-                )
-                lat_h, lon_h = _aplicar_interferencia_gps(
-                    self.antena_heading.lat_e7, self.antena_heading.lon_e7,
-                    self.interferencia_gps_mm, self.antena_heading.lat_origen,
-                )
+                msg_path, msg_heading = self._formatear_mensajes()
                 try:
-                    ser_path.write(f"Lat {lat_p} Lon {lon_p} Carr {self.carr}\n".encode("utf-8"))
+                    ser_path.write(msg_path.encode("utf-8"))
                     ser_path.flush()
                     ultimo_envio = ahora
                 except Exception as e:
@@ -379,7 +385,7 @@ class CajaInterfaz:
                     break
                 if ser_heading is not None:
                     try:
-                        ser_heading.write(f"Lat {lat_h} Lon {lon_h} Carr {self.carr}\n".encode("utf-8"))
+                        ser_heading.write(msg_heading.encode("utf-8"))
                         ser_heading.flush()
                     except Exception as e:
                         print(f"CajaInterfaz: error enviando heading GPS: {e}")
@@ -397,6 +403,36 @@ class CajaInterfaz:
         ser_path.close()
         if ser_heading is not None:
             ser_heading.close()
+
+    def _formatear_mensajes(self) -> tuple[str, str]:
+        """Devuelve los mensajes de path y heading según el modo de coordenadas configurado"""
+        if self.modo_coordenadas == "cartesiana":
+            x_p, y_p = _aplicar_interferencia_cartesiana(
+                self.antena_path.posicion_x, self.antena_path.posicion_y,
+                self.interferencia_gps_mm,
+            )
+            x_h, y_h = _aplicar_interferencia_cartesiana(
+                self.antena_heading.posicion_x, self.antena_heading.posicion_y,
+                self.interferencia_gps_mm,
+            )
+            return (
+                f"X {round(x_p * 1000)} Y {round(y_p * 1000)} Carr {self.carr}\n",
+                f"X {round(x_h * 1000)} Y {round(y_h * 1000)} Carr {self.carr}\n",
+            )
+
+        # modo "geo" (por defecto): coordenadas geográficas ×10⁷
+        lat_p, lon_p = _aplicar_interferencia_gps(
+            self.antena_path.lat_e7, self.antena_path.lon_e7,
+            self.interferencia_gps_mm, self.antena_path.lat_origen,
+        )
+        lat_h, lon_h = _aplicar_interferencia_gps(
+            self.antena_heading.lat_e7, self.antena_heading.lon_e7,
+            self.interferencia_gps_mm, self.antena_heading.lat_origen,
+        )
+        return (
+            f"Lat {lat_p} Lon {lon_p} Carr {self.carr}\n",
+            f"Lat {lat_h} Lon {lon_h} Carr {self.carr}\n",
+        )
 
     def _procesar(self, msg: str):
         """Actualiza los estados de guiado según los mensajes del Arduino Path"""

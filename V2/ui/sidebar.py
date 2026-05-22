@@ -118,13 +118,14 @@ def _iniciar_simulacion(
         puerto_heading = state.get("k_caja_puerto_heading", "")
         if puerto_path and puerto_path != SIN_CAJA_PUERTO:
             sim.lineal.asignar_caja(
-                indice_tramo   = state.get("k_caja_tramo", 0),
-                metros_path    = float(state.get("k_caja_metros_path", longitud_tramo * 0.25)),
-                metros_heading = float(state.get("k_caja_metros_heading", longitud_tramo * 0.75)),
-                lat_origen     = state.get("k_caja_lat_e7", 404168000) / 1e7,
-                lon_origen     = state.get("k_caja_lon_e7", -37038000) / 1e7,
-                puerto_path    = puerto_path,
-                puerto_heading = puerto_heading if puerto_heading and puerto_heading != SIN_CAJA_PUERTO else puerto_path,
+                indice_tramo      = state.get("k_caja_tramo", 0),
+                metros_path       = float(state.get("k_caja_metros_path", longitud_tramo * 0.25)),
+                metros_heading    = float(state.get("k_caja_metros_heading", longitud_tramo * 0.75)),
+                lat_origen        = state.get("k_caja_lat_e7", 404168000) / 1e7,
+                lon_origen        = state.get("k_caja_lon_e7", -37038000) / 1e7,
+                puerto_path       = puerto_path,
+                puerto_heading    = puerto_heading if puerto_heading and puerto_heading != SIN_CAJA_PUERTO else puerto_path,
+                modo_coordenadas  = state.get("k_caja_modo_coordenadas", "geo"),
             )
             sim.lineal.caja_interfaz.iniciar()
 
@@ -176,9 +177,22 @@ def _renderizar_seccion_conexion_caja(numero_tramos: int, longitud_tramo: float,
     state = st.session_state
     state["k_caja_carr"] = 2  # Carr=2 significa RTK FIX (la caja Arduino solo acepta este modo de posicionamiento)
 
+    st.radio(
+        "Formato de coordenadas",
+        options=["geo", "cartesiana"],
+        format_func=lambda k: {
+            "geo":        "Geográficas  (Lat/Lon ×10⁷)",
+            "cartesiana": "Cartesianas  (X/Y en mm)",
+        }[k],
+        key="k_caja_modo_coordenadas",
+        disabled=bloqueado,
+        help="Geográficas: protocolo GPS estándar · Cartesianas: coordenadas locales del campo en milímetros.",
+    )
+    modo = state.get("k_caja_modo_coordenadas", "geo")
+
     col_lat, col_lon = st.columns(2)
-    col_lat.number_input("Lat. origen (×10⁷)", value=404168000, step=1, key="k_caja_lat_e7", disabled=bloqueado)
-    col_lon.number_input("Lon. origen (×10⁷)", value=-37038000, step=1, key="k_caja_lon_e7", disabled=bloqueado)
+    col_lat.number_input("Lat. origen (×10⁷)", value=404168000, step=1, key="k_caja_lat_e7", disabled=bloqueado or modo == "cartesiana")
+    col_lon.number_input("Lon. origen (×10⁷)", value=-37038000, step=1, key="k_caja_lon_e7", disabled=bloqueado or modo == "cartesiana")
 
     st.selectbox(
         "Tramo con los GPS",
@@ -415,16 +429,16 @@ def renderizar_sidebar():
 
         if modo_conexion == "caja":
             st.divider()
-            st.markdown("##### Interferencia GPS simulada")
+            st.markdown("##### Ruido de posición simulado")
             interferencia = st.slider(
                 "Desvío aleatorio por emisión (mm)",
                 min_value=0, max_value=15, value=0, step=1,
                 key="k_interferencia_gps_mm",
-                help="±X mm de error aleatorio añadido a cada coordenada enviada.",
+                help="±X mm de error aleatorio añadido a cada coordenada enviada, independientemente del formato.",
             )
             st.caption(
                 f"Enviando coordenada con ±{interferencia} mm de ruido" if interferencia > 0
-                else "Sin interferencia — coordenada perfecta"
+                else "Sin ruido — coordenada exacta"
             )
 
         st.divider()

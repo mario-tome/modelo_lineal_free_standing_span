@@ -489,10 +489,18 @@ def panel_principal():
         color_end    = "#ffa657" if caja.slow_down_end_tower else "#484f58"
 
         col_p, col_h, col_sf, col_gk, col_sc, col_se = st.columns(6)
-        col_p.metric("GPS Path",    f"{caja.antena_path.lat_e7} / {caja.antena_path.lon_e7}",
-                     help=f"{caja.antena_path.latitud:.7f}°  {caja.antena_path.longitud:.7f}°")
-        col_h.metric("GPS Heading", f"{caja.antena_heading.lat_e7} / {caja.antena_heading.lon_e7}",
-                     help=f"{caja.antena_heading.latitud:.7f}°  {caja.antena_heading.longitud:.7f}°")
+        if caja.modo_coordenadas == "cartesiana":
+            col_p.metric("GPS Path",
+                         f"{round(caja.antena_path.posicion_x * 1000)} / {round(caja.antena_path.posicion_y * 1000)} mm",
+                         help="X / Y en milímetros — modo cartesiano")
+            col_h.metric("GPS Heading",
+                         f"{round(caja.antena_heading.posicion_x * 1000)} / {round(caja.antena_heading.posicion_y * 1000)} mm",
+                         help="X / Y en milímetros — modo cartesiano")
+        else:
+            col_p.metric("GPS Path",    f"{caja.antena_path.lat_e7} / {caja.antena_path.lon_e7}",
+                         help=f"{caja.antena_path.latitud:.7f}°  {caja.antena_path.longitud:.7f}°")
+            col_h.metric("GPS Heading", f"{caja.antena_heading.lat_e7} / {caja.antena_heading.lon_e7}",
+                         help=f"{caja.antena_heading.latitud:.7f}°  {caja.antena_heading.longitud:.7f}°")
         col_sf.metric("Safety",    "OK" if caja.safety_ok           else "FAIL")
         col_gk.metric("GPS status","OK" if caja.gps_ok              else "FAIL")
         col_sc.metric("Slow Cart", "ON" if caja.slow_down_cart      else "—")
