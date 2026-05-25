@@ -573,6 +573,7 @@ def renderizar_sidebar():
                 sim.lineal.start()
                 if sim.lineal.caja_interfaz:
                     sim.lineal.caja_interfaz.iniciar()
+                sim.estado_previo_caja = {"cart": False, "end": False, "safety": True, "gps": True}
                 sim.registro.append({"t": sim.lineal._tiempo_formateado(), "tipo": "START", "msg": f"Sistema reanudado desde {sim.lineal.posicion_norte:.2f} m"})
                 sim.en_marcha = True
                 sim.pausado = False

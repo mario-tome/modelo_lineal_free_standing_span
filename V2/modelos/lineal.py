@@ -115,6 +115,8 @@ class Lineal:
         self._en_marcha = False
         self.tramo_cart.motor_activo = False
         self.tramo_end.motor_activo = False
+        self.slow_down_cart = False
+        self.slow_down_end_tower = False
 
     def invertir_direccion(self):
         self.direccion *= -1
