@@ -83,7 +83,7 @@ Las torres Cart y End-tower acumulan una pequeña deriva lateral aleatoria (ruid
 ## Arquitectura del código
 
 ```
-digital_tiwns/
+digital_twins/
   ├── app.py               # Punto de entrada Streamlit
   ├── modelos/
   │   ├── componentes.py   # Bloques reutilizables (TramoFinal, TramoIntermedio, FSS, GPS, Caja)
@@ -384,7 +384,7 @@ Al finalizar la simulación (o al pausarla), si hay datos, aparece un botón **�
 - Coordenadas GPS de las antenas Path y Heading (lat/lon ×10⁷).
 - Error de distancia (mm) y de rumbo (°) respecto a la trayectoria objetivo.
 
-Los archivos se guardan automáticamente en la carpeta `V2/exports/` durante la simulación con el nombre `simulacion_YYYYMMDD_HHMMSS.csv`.
+Los archivos se guardan automáticamente en la carpeta `exports/` durante la simulación con el nombre `simulacion_YYYYMMDD_HHMMSS.csv`.
 
 ---
 
