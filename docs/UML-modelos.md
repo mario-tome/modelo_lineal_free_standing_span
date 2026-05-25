@@ -15,112 +15,120 @@ direction TB
         +avanzar_en_circunferencia(centro_x, centro_y, radio, inicio_x, inicio_y, distancia) tuple
     }
 
+    class _metros_recorridos {
+        <<function privada>>
+        +_metros_recorridos(velocidad_nominal: float, factor_velocidad: float, segundos: float, porcentaje_patinaje: float) float
+    }
+
     class _aplicar_interferencia_gps {
         <<function privada>>
         +_aplicar_interferencia_gps(lat_e7: int, lon_e7: int, interferencia_mm: float, lat_origen: float) tuple
     }
 
-    class Contactor {
-	    «class» CERRADO: str = "CERRADO"
-	    «class» ABIERTO: str = "ABIERTO"
-	    +duty_cycle: float
-	    +estado: str
-	    +esta_cerrado: bool «prop»
-	    +__init__(velocidad_porcentaje: float = 0.0)
-	    +actualizar_duty_cycle(segundo_en_ciclo: int, duracion_ciclo: int = 60)
-	    +cerrar()
-	    +abrir()
+    class _aplicar_interferencia_cartesiana {
+        <<function privada>>
+        +_aplicar_interferencia_cartesiana(x: float, y: float, interferencia_mm: float) tuple
     }
 
-    class Torre {
-	    +posicion_x: float
-	    +posicion_y: float
-	    +longitud_tramo: float
-	    +velocidad_nominal: float
-	    +porcentaje_patinaje: float
-	    +__init__(posicion_x, posicion_y, longitud_tramo, velocidad_nominal: float = 3.0)
-	    +avanzar(segundos: float, direccion: int = 1, rumbo: float = 0.0) float
+    class TramoFinal {
+        +posicion_x: float
+        +posicion_y: float
+        +longitud_tramo: float
+        +velocidad_nominal: float
+        +velocidad_porcentaje: float
+        +ruido_lateral: float
+        +porcentaje_patinaje: float
+        +motor_activo: bool
+        +__init__(posicion_x, posicion_y, longitud_tramo, velocidad_nominal: float = 3.0, velocidad_porcentaje: float = 50.0, ruido_lateral: float = 0.0)
+        +actualizar_motor(segundo_en_ciclo: int, duracion_ciclo: int = 60)
+        +avanzar(segundos: float, direccion: int = 1, rumbo: float = 0.0) float
     }
 
-    class Torre_Guia {
-	    +contactor: Contactor
-	    +ruido_lateral: float
-	    +__init__(posicion_x, posicion_y, longitud_tramo, velocidad_nominal: float = 3.0, velocidad_porcentaje: float = 50.0, ruido_lateral: float = 0.0)
-	    +avanzar(segundos: float, direccion: int = 1, rumbo: float = 0.0) float
-    }
-
-    class Torre_Intermedia {
-	    «class» FACTOR_SOBREVELOCIDAD: float = 1.5
-	    «class» FACTOR_SOBREVELOCIDAD_RAPIDA: float = 2.0
+    class TramoIntermedio {
+	    «class» FACTOR_VELOCIDAD_NORMAL: float = 1.5
 	    «class» UMBRAL_ARRANQUE: float = 0.10
 	    «class» UMBRAL_ADELANTO: float = 0.10
-	    +contactor: Contactor
-	    +es_motor_rapido: bool
-	    +factor_sobrevelocidad: float «prop»
-	    +__init__(posicion_x, posicion_y, longitud_tramo, velocidad_nominal: float = 3.0, es_motor_rapido: bool = False)
-	    +seguir(objetivo_x: float, objetivo_y: float, segundos: float, direccion: int = 1, pivot_x: float = None, pivot_y: float = None, rumbo: float = 0.0) float
+        +posicion_x: float
+        +posicion_y: float
+        +longitud_tramo: float
+        +velocidad_nominal: float
+        +factor_velocidad: float
+        +porcentaje_patinaje: float
+        +motor_activo: bool
+        +__init__(posicion_x, posicion_y, longitud_tramo, velocidad_nominal: float = 3.0, factor_velocidad: float = FACTOR_VELOCIDAD_NORMAL)
+        +seguir(objetivo_x: float, objetivo_y: float, segundos: float, direccion: int = 1, pivote_x: float = None, pivote_y: float = None, rumbo: float = 0.0) float
+        -_avanzar_en_arco(pivote_x: float, pivote_y: float, metros: float, direccion: int, rumbo: float)
     }
 
-    class Tramo {
+    class FreeStandingSpan {
+	    «class» FACTOR_MOTOR_IZQUIERDO: float = 1.5
+	    «class» FACTOR_MOTOR_RAPIDO: float = 2.0
 	    «class» TOLERANCIA_ALINEACION: float = 0.05
-	    +torre_izquierda: Torre
-	    +torre_derecha: Torre
-	    +es_rigido: bool
-	    +angulo_referencia: float
-	    +longitud_horizontal: float «prop»
-	    +desviacion_norte: float «prop»
-	    +desviacion_norte_relativa: float «prop»
-	    +angulo_grados: float «prop»
-	    +angulo_relativo_grados: float «prop»
-	    +esta_alineado: bool «prop»
-	    +__init__(torre_izquierda, torre_derecha, es_rigido: bool = False)
+        +tramo_izq: TramoIntermedio
+        +tramo_der: TramoIntermedio
+        +longitud: float
+        -_angulo_referencia_grados: float
+        +angulo_referencia_grados: float «prop»
+        +esta_alineado: bool «prop»
+        +__init__(tramo_izq: TramoIntermedio, tramo_der: TramoIntermedio, longitud: float)
+        +actualizar(cart_x: float, cart_y: float, end_x: float, end_y: float) float
     }
 
-    class GPS {
-	    +torre: Torre_Intermedia
-	    +lat_origen: float
-	    +lon_origen: float
-	    +puerto_serial: str | None
-	    +baudrate: int
-	    +verbose_consola: bool
-	    +interferencia_gps_mm: float
-	    -_conexion
-	    -_hilo
-	    -_activo: bool
-	    +latitud: float «prop»
-	    +longitud: float «prop»
-	    +lat_e7: int «prop»
-	    +lon_e7: int «prop»
-	    +__init__(torre, lat_origen, lon_origen, puerto_serial: str = None, baudrate: int = 9600, verbose_consola: bool = False)
-	    +iniciar_transmision_background()
-	    +detener_transmision_background()
-	    -_bucle_transmision()
+    class AntenaGPS {
+        +seccion_inicio
+        +seccion_fin
+        +metros_desde_inicio: float
+        +lat_origen: float
+        +lon_origen: float
+        +interferencia_gps_mm: float
+        +posicion_x: float «prop»
+        +posicion_y: float «prop»
+        +latitud: float «prop»
+        +longitud: float «prop»
+        +lat_e7: int «prop»
+        +lon_e7: int «prop»
+        +__init__(seccion_inicio, seccion_fin, metros_desde_inicio: float, lat_origen: float, lon_origen: float)
+        -_fraccion_en_tramo() float
     }
 
     class CajaInterfaz {
 	    «class» BAUDRATE: int = 115200
-	    +torre: Torre_Intermedia
-	    +lat_origen: float
-	    +lon_origen: float
-	    +puerto_serial: str
-	    +carr: int
-	    +slow_down_cart: bool
-	    +slow_down_end_tower: bool
-	    +safety_ok: bool
-	    +gps_ok: bool
-	    +ultimo_mensaje: str
-	    +interferencia_gps_mm: float
-	    -_activo: bool
-	    -_hilo
-	    +latitud: float «prop»
-	    +longitud: float «prop»
-	    +lat_e7: int «prop»
-	    +lon_e7: int «prop»
-	    +__init__(torre, lat_origen, lon_origen, puerto_serial: str, carr: int = 2)
-	    +iniciar()
-	    +detener()
-	    -_bucle()
-	    -_procesar(msg: str)
+        +antena_path: AntenaGPS
+        +antena_heading: AntenaGPS
+        +puerto_path: str
+        +puerto_heading: str
+        +carr: int
+        +modo_coordenadas: str
+        +slow_down_cart: bool
+        +slow_down_end_tower: bool
+        +safety_ok: bool
+        +gps_ok: bool
+        +ultimo_mensaje: str
+        +interferencia_gps_mm: float
+        -_activo: bool
+        -_hilo
+        +__init__(antena_path: AntenaGPS, antena_heading: AntenaGPS, puerto_path: str, puerto_heading: str, carr: int = 2, modo_coordenadas: str = "geo")
+        +iniciar()
+        +detener()
+        -_bucle()
+        -_formatear_mensajes() tuple
+        -_procesar(msg: str)
+    }
+
+    class Centro {
+        <<uso futuro>>
+        +posicion_x: float
+        +posicion_y: float
+        +__init__(posicion_x: float = 0.0, posicion_y: float = 0.0)
+    }
+
+    class TramoCorner {
+        <<uso futuro>>
+        +posicion_x: float
+        +posicion_y: float
+        +longitud_tramo: float
+        +angulo_giro: float
+        +__init__(posicion_x: float, posicion_y: float, longitud_tramo: float, angulo_giro: float = 0.0)
     }
 
     %% ─────────────────────────────────────────────────────────────────────
@@ -129,84 +137,65 @@ direction TB
 
     class Lineal {
 	    «class» DURACION_CICLO: int = 60
-	    +numero_tramos: int
-	    +longitud_tramo: float
-	    +velocidad_porcentaje: float
-	    +velocidad_nominal: float
-	    +indice_tramo_rigido: int
-	    +indice_torre_motor_rapido: int
-	    +torres: list~Torre~
-	    +tramos: list~Tramo~
-	    +guia_izquierda: Torre_Guia
-	    +guia_derecha: Torre_Guia
-	    +tiempo_total_segundos: int
-	    +ciclo_actual: int
-	    +direccion: int
-	    +slow_down_cart: bool
-	    +slow_down_end_tower: bool
-	    +motor_rapido_pct_on: float
-	    -_segundo_en_ciclo: int
-	    -_segundos_motor_rapido_on: int
-	    -_en_marcha: bool
-	    +gps: GPS | None
-	    +caja_interfaz: CajaInterfaz | None
-	    +posicion_norte: float «prop»
-	    +longitud_total: float «prop»
-	    +esta_alineado: bool «prop»
-	    +en_marcha_atras: bool «prop»
-	    +rumbo: float «prop»
-	    +__init__(numero_tramos: int = 5, longitud_tramo: float = 50.0, velocidad_porcentaje: float = 50.0, velocidad_nominal: float = 3.0, ruido_lateral: float = 0.0)
-	    +asignar_gps(indice_torre: int, lat_origen: float, lon_origen: float, puerto_serial: str = None, baudrate: int = 9600, verbose_consola: bool = False)
-	    +asignar_caja(indice_torre: int, lat_origen: float, lon_origen: float, puerto_serial: str, carr: int = 2)
-	    +start()
-	    +stop()
-	    +invertir_direccion()
-	    +set_speed(velocidad_porcentaje: float)
-	    +avanza(segundos: int = 1)
-	    -_actualizar_fss()
-	    -_tiempo_formateado() str
-    }
-
-    %% ─────────────────────────────────────────────────────────────────────
-    %% módulo: modelos/pivot.py  (stub — en desarrollo)
-    %% ─────────────────────────────────────────────────────────────────────
-
-    class Pivot {
-        <<en desarrollo>>
-    }
-
-    %% ─────────────────────────────────────────────────────────────────────
-    %% módulo: modelos/corner.py  (stub — en desarrollo)
-    %% ─────────────────────────────────────────────────────────────────────
-
-    class Corner {
-        <<en desarrollo>>
+        +numero_tramos: int
+        +longitud_tramo: float
+        +velocidad_porcentaje: float
+        +velocidad_nominal: float
+        +indice_fss_izq: int
+        +indice_fss_der: int
+        +secciones: list
+        +fss: FreeStandingSpan
+        +tramo_cart: TramoFinal
+        +tramo_end: TramoFinal
+        +torre_rapida: TramoIntermedio
+        +tiempo_total_segundos: int
+        +ciclo_actual: int
+        +motor_rapido_pct_on: float
+        +direccion: int
+        +slow_down_cart: bool
+        +slow_down_end_tower: bool
+        +caja_interfaz: CajaInterfaz | None
+        -_segundo_en_ciclo: int
+        -_en_marcha: bool
+        -_segundos_motor_rapido_on: int
+        -_angulo_referencia_grados: float
+        +posicion_norte: float «prop»
+        +longitud_total: float «prop»
+        +esta_alineado: bool «prop»
+        +en_marcha_atras: bool «prop»
+        +rumbo: float «prop»
+        +__init__(numero_tramos: int = 5, longitud_tramo: float = 50.0, velocidad_porcentaje: float = 50.0, velocidad_nominal: float = 3.0, ruido_lateral: float = 0.0)
+        +start()
+        +stop()
+        +invertir_direccion()
+        +set_speed(velocidad_porcentaje: float)
+        +asignar_caja(indice_tramo: int, metros_path: float, metros_heading: float, lat_origen: float, lon_origen: float, puerto_path: str, puerto_heading: str, carr: int = 2, modo_coordenadas: str = "geo")
+        +avanza(segundos: int = 1)
+        +get_span_info(indice: int) dict
+        +get_span_alineado(indice: int) bool
+        -_tiempo_formateado() str
+        -_validar_seccion_intermedia(indice_seccion: int) TramoIntermedio
     }
 
     %% ─────────────────────────────────────────────────────────────────────
     %% Relaciones
     %% ─────────────────────────────────────────────────────────────────────
 
-    Torre <|-- Torre_Guia : hereda
-    Torre <|-- Torre_Intermedia : hereda
-    Torre_Guia *-- Contactor : compone
-    Torre_Intermedia *-- Contactor : compone
-    Tramo --> Torre : referencia izq
-    Tramo --> Torre : referencia der
-    GPS --> Torre_Intermedia : referencia
-    CajaInterfaz --> Torre_Intermedia : referencia
-    Torre_Intermedia --> avanzar_en_circunferencia : usa
-    GPS --> _aplicar_interferencia_gps : usa
+    FreeStandingSpan --> TramoIntermedio : referencia izq y der
+    AntenaGPS --> TramoFinal : seccion_inicio / seccion_fin
+    AntenaGPS --> TramoIntermedio : seccion_inicio / seccion_fin
+    AntenaGPS --> METROS_POR_GRADO_LAT : usa
+    AntenaGPS --> _aplicar_interferencia_gps : usa
+    AntenaGPS --> _aplicar_interferencia_cartesiana : usa
+    CajaInterfaz *-- AntenaGPS : compone (path y heading)
     CajaInterfaz --> _aplicar_interferencia_gps : usa
+    CajaInterfaz --> _aplicar_interferencia_cartesiana : usa
+    TramoIntermedio --> avanzar_en_circunferencia : usa (arco)
+    TramoIntermedio --> _metros_recorridos : usa
+    TramoFinal --> _metros_recorridos : usa
     _aplicar_interferencia_gps --> METROS_POR_GRADO_LAT : usa
-    GPS --> METROS_POR_GRADO_LAT : usa
-    CajaInterfaz --> METROS_POR_GRADO_LAT : usa
-    Lineal *-- Torre : compone
-    Lineal *-- Tramo : compone
-    Lineal o-- GPS : agregación
+    _aplicar_interferencia_cartesiana --> METROS_POR_GRADO_LAT : usa
+    Lineal *-- TramoFinal : compone (secciones Cart y End)
+    Lineal *-- TramoIntermedio : compone (secciones intermedias)
+    Lineal *-- FreeStandingSpan : compone
     Lineal o-- CajaInterfaz : agregación
-    Lineal --> Torre_Guia : usa
-    Pivot --> Torre_Guia : usará
-    Pivot --> Torre_Intermedia : usará
-    Corner --> Torre_Guia : usará
-    Corner --> Torre_Intermedia : usará
