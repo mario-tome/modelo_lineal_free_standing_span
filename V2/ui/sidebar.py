@@ -17,7 +17,29 @@ except ImportError:
 SIN_CAJA_PUERTO = "— Selecciona puerto —"
 
 
+def _seccion(titulo: str) -> None:
+    """Encabezado de sección del sidebar: blanco, legible, con peso visual claro."""
+    st.markdown(
+        f"<p style='color:#e6edf3;font-size:0.95rem;font-weight:600;"
+        f"margin:8px 0 2px 0;letter-spacing:0.3px'>{titulo}</p>",
+        unsafe_allow_html=True,
+    )
+
+
 # SIDEBAR PARA EL MODO OBSERVADOR (solo lectura)
+
+def _punto_estado(etiqueta: str, activo: bool, color_activo: str, color_inactivo: str = "#484f58") -> str:
+    """Fila de estado con punto de color: · Safety OK · GPS FAIL etc."""
+    color = color_activo if activo else color_inactivo
+    return (
+        f"<div style='display:flex;align-items:center;gap:6px;margin:3px 0'>"
+        f"<span style='width:7px;height:7px;border-radius:50%;background:{color};"
+        f"flex-shrink:0'></span>"
+        f"<span style='color:{color};font-size:0.82rem;font-family:monospace;font-weight:600'>"
+        f"{etiqueta}</span>"
+        f"</div>"
+    )
+
 
 def _renderizar_sidebar_observador(sim: SimState) -> None:
     st.markdown(
@@ -37,56 +59,127 @@ def _renderizar_sidebar_observador(sim: SimState) -> None:
         return
 
     lineal = sim.lineal
-    st.markdown("##### Configuración activa")
-    col_iz, col_de = st.columns(2)
-    col_iz.metric("N° tramos", lineal.numero_tramos)
-    col_de.metric("Long. tramo", f"{lineal.longitud_tramo} m")
-    col_iz.metric("Vel. nominal", f"{lineal.velocidad_nominal} m/min")
-    col_de.metric("Campo total", f"{sim.longitud_campo} m")
+
+    # Configuración del lineal en marcha
+    _seccion("Lineal activo")
+    longitud_total = lineal.numero_tramos * lineal.longitud_tramo
+    st.markdown(
+        f"<p style='color:#e6edf3;font-size:0.88rem;margin:2px 0 8px 0'>"
+        f"{lineal.numero_tramos} tramos · {lineal.longitud_tramo} m/tramo · "
+        f"<b>{longitud_total} m</b> totales</p>",
+        unsafe_allow_html=True,
+    )
 
     velocidad_media = lineal.velocidad_nominal * lineal.velocidad_porcentaje / 100.0
     st.markdown(
-        f"<div style='background:#161b22;border:1px solid #30363d;border-radius:8px;"
-        f"padding:8px 12px;margin:2px 0 10px 0;display:flex;justify-content:space-between'>"
-        f"<span><span style='color:#8b949e;font-size:0.7rem'>Panel speed </span>"
-        f"<b style='color:#e6edf3;font-family:monospace'>{lineal.velocidad_porcentaje} %</b></span>"
-        f"<span><span style='color:#8b949e;font-size:0.7rem'>MEDIA </span>"
-        f"<b style='color:#3fb950;font-family:monospace'>{velocidad_media:.2f} m/min</b></span>"
+        f"<div style='background:#161b22;border:1px solid #30363d;border-radius:10px;"
+        f"padding:12px 16px;margin:4px 0 10px 0;"
+        f"display:grid;grid-template-columns:1fr 1fr;gap:4px'>"
+        f"<div>"
+        f"<div style='color:#8b949e;font-size:0.72rem;letter-spacing:1.5px;"
+        f"text-transform:uppercase;font-family:monospace;margin-bottom:4px'>Panel speed</div>"
+        f"<div style='color:#e6edf3;font-size:1.1rem;font-weight:700;font-family:monospace;line-height:1'>"
+        f"{lineal.velocidad_porcentaje}"
+        f"<span style='color:#8b949e;font-size:0.82rem;font-weight:400'> %</span></div>"
+        f"</div>"
+        f"<div>"
+        f"<div style='color:#8b949e;font-size:0.72rem;letter-spacing:1.5px;"
+        f"text-transform:uppercase;font-family:monospace;margin-bottom:4px'>Vel. media</div>"
+        f"<div style='color:#3fb950;font-size:1.1rem;font-weight:700;font-family:monospace;line-height:1'>"
+        f"{velocidad_media:.2f}"
+        f"<span style='color:#8b949e;font-size:0.82rem;font-weight:400'> m/min</span></div>"
+        f"</div>"
         f"</div>",
         unsafe_allow_html=True,
     )
 
+    # Conexión GPS: tramo, formato y estado en tiempo real
     st.divider()
-    st.markdown("##### Conexión")
-    if lineal.caja_interfaz:
-        st.markdown("<span style='color:#e6edf3;font-size:0.85rem'>Caja de interfaz GPS — 2 Arduinos I2C (115 200 baud)</span>", unsafe_allow_html=True)
-    else:
-        st.markdown("<span style='color:#8b949e;font-size:0.85rem'>Sin conexión externa</span>", unsafe_allow_html=True)
+    _seccion("Conexión GPS")
 
-    if sim.auto_reverse_activo:
-        st.divider()
-        st.markdown("##### Auto-reverse")
+    if lineal.caja_interfaz:
+        caja = lineal.caja_interfaz
+
+        try:
+            indice_tramo = lineal.secciones.index(caja.antena_path.seccion_inicio)
+            etiqueta_tramo = f"Tramo {indice_tramo + 1}  (secciones {indice_tramo} → {indice_tramo + 1})"
+        except ValueError:
+            etiqueta_tramo = "Tramo —"
+
+        nombre_formato = "Geográfico  (Lat/Lon ×10⁷)" if caja.modo_coordenadas == "geo" else "Cartesiano  (X/Y mm)"
+
         st.markdown(
-            f"<span style='color:#e6edf3;font-size:0.85rem'>"
-            f"Activo · {sim.limite_sur:.0f} m — {sim.limite_norte:.0f} m · "
-            f"<b>{sim.numero_inversiones}</b> inversiones</span>",
+            f"<p style='color:#e6edf3;font-size:0.85rem;margin:4px 0 2px 0'>{etiqueta_tramo}</p>"
+            f"<p style='color:#8b949e;font-size:0.80rem;margin:0 0 8px 0'>{nombre_formato}</p>",
             unsafe_allow_html=True,
         )
 
+        col_izq, col_der = st.columns(2)
+        with col_izq:
+            st.markdown(_punto_estado("Safety OK",  caja.safety_ok,           "#3fb950", "#f85149"), unsafe_allow_html=True)
+            st.markdown(_punto_estado("Slow Cart",  caja.slow_down_cart,      "#ffa657"), unsafe_allow_html=True)
+        with col_der:
+            st.markdown(_punto_estado("GPS OK",     caja.gps_ok,              "#3fb950", "#f85149"), unsafe_allow_html=True)
+            st.markdown(_punto_estado("Slow EndT",  caja.slow_down_end_tower, "#ffa657"), unsafe_allow_html=True)
+    else:
+        st.markdown(
+            "<p style='color:#8b949e;font-size:0.85rem;margin:4px 0'>Sin conexión externa</p>",
+            unsafe_allow_html=True,
+        )
+
+    # Trayectoria: error de distancia y rumbo en tiempo real
     if sim.trayectoria_activa and sim.trayectoria_puntos:
         st.divider()
-        st.markdown("##### Trayectoria objetivo GPS")
+        _seccion("Trayectoria objetivo")
+
         numero_puntos = len(sim.trayectoria_puntos)
+        texto_distancia = f"{sim.error_distancia_mm:.0f} mm" if sim.error_distancia_mm is not None else "—"
+        texto_rumbo     = f"{sim.error_rumbo_grados:+.1f}°"  if sim.error_rumbo_grados  is not None else "—"
+
         st.markdown(
-            f"<span style='color:#e6edf3;font-size:0.85rem'>"
-            f"Activa · {numero_puntos} puntos · {numero_puntos - 1} segmentos</span>",
+            f"<p style='color:#8b949e;font-size:0.80rem;margin:4px 0 8px 0'>"
+            f"{numero_puntos} puntos · {numero_puntos - 1} segmentos</p>"
+            f"<div style='background:#161b22;border:1px solid #30363d;border-radius:10px;"
+            f"padding:12px 16px;display:grid;grid-template-columns:1fr 1fr;gap:4px'>"
+            f"<div>"
+            f"<div style='color:#8b949e;font-size:0.72rem;letter-spacing:1.5px;"
+            f"text-transform:uppercase;font-family:monospace;margin-bottom:4px'>Error dist.</div>"
+            f"<div style='color:#e6edf3;font-size:1.1rem;font-weight:700;font-family:monospace;line-height:1'>"
+            f"{texto_distancia}</div>"
+            f"</div>"
+            f"<div>"
+            f"<div style='color:#8b949e;font-size:0.72rem;letter-spacing:1.5px;"
+            f"text-transform:uppercase;font-family:monospace;margin-bottom:4px'>Error rumbo</div>"
+            f"<div style='color:#e6edf3;font-size:1.1rem;font-weight:700;font-family:monospace;line-height:1'>"
+            f"{texto_rumbo}</div>"
+            f"</div>"
+            f"</div>",
             unsafe_allow_html=True,
         )
 
-    st.divider()
-    st.markdown("##### Teclado")
-    st.caption("Control exclusivo del operador")
-    _renderizar_referencia_teclado(activo=False)
+    # Auto-reverse
+    if sim.auto_reverse_activo:
+        st.divider()
+        _seccion("Auto-reverse")
+        st.markdown(
+            f"<div style='background:#161b22;border:1px solid #30363d;border-radius:10px;"
+            f"padding:12px 16px;display:grid;grid-template-columns:1fr 1fr;gap:4px'>"
+            f"<div>"
+            f"<div style='color:#8b949e;font-size:0.72rem;letter-spacing:1.5px;"
+            f"text-transform:uppercase;font-family:monospace;margin-bottom:4px'>Rango</div>"
+            f"<div style='color:#e6edf3;font-size:0.92rem;font-weight:600;font-family:monospace'>"
+            f"{sim.limite_sur:.0f} — {sim.limite_norte:.0f} m</div>"
+            f"</div>"
+            f"<div>"
+            f"<div style='color:#8b949e;font-size:0.72rem;letter-spacing:1.5px;"
+            f"text-transform:uppercase;font-family:monospace;margin-bottom:4px'>Inversiones</div>"
+            f"<div style='color:#e6edf3;font-size:1.1rem;font-weight:700;font-family:monospace;line-height:1'>"
+            f"{sim.numero_inversiones}</div>"
+            f"</div>"
+            f"</div>",
+            unsafe_allow_html=True,
+        )
+
     st.divider()
 
 
@@ -151,25 +244,10 @@ def _limpiar_y_resetear() -> None:
     valores_iniciales = get_defaults()
     for clave in CLAVES_SIMULACION:
         sim[clave] = valores_iniciales[clave]
-    st.session_state["tecla_reversa_activa"] = False
-    st.session_state["es_operador"]          = False
+    st.session_state["es_operador"] = False
 
 
 # BLOQUES DE CONFIGURACIÓN DE CONEXIÓN GPS, CAJA ARDUINO Y TRAYECTORIA GPS OBJETIVO
-
-def _renderizar_referencia_teclado(activo: bool = True) -> None:
-    for tecla, desc in [
-        ("< (mantener)", "Ralentiza Cart"),
-        ("- (mantener)", "Ralentiza End-tower"),
-        ("R (pulsar)", "Marcha atrás / avance normal"),
-    ]:
-        color_tecla = "#e6edf3" if activo else "#484f58"
-        st.markdown(
-            f"<code style='background:#161b22;border:1px solid #30363d;border-radius:4px;"
-            f"padding:1px 6px;font-size:0.78rem;color:{color_tecla}'>{tecla}</code>"
-            f"<span style='color:#8b949e;font-size:0.78rem;margin-left:6px'>{desc}</span>",
-            unsafe_allow_html=True,
-        )
 
 
 def _renderizar_seccion_conexion_caja(numero_tramos: int, longitud_tramo: float,
@@ -302,7 +380,12 @@ def _renderizar_seccion_trayectoria(bloqueado: bool) -> None:
 
 def renderizar_sidebar():
     with st.sidebar:
-        st.markdown("## Gemelo Digital")
+        st.markdown(
+            "<p style='color:#e6edf3;font-size:1.45rem;font-weight:700;"
+            "margin:4px 0 6px 0;letter-spacing:-0.2px'>"
+            "Gemelo <span style='color:#3fb950'>Digital</span></p>",
+            unsafe_allow_html=True,
+        )
 
         sim = get_sim()
         state = st.session_state
@@ -332,9 +415,13 @@ def renderizar_sidebar():
             return
 
         # Configuración del Lineal FSS
-        st.caption("Configura tu Lineal FSS")
+        st.markdown(
+            "<p style='color:#e6edf3;font-size:1.0rem;font-weight:400;margin:0 0 12px 0'>"
+            "Configura tu Lineal FSS</p>",
+            unsafe_allow_html=True,
+        )
 
-        st.markdown("##### Geometría")
+        _seccion("Geometría")
         if bloqueado:
             st.markdown(
                 "<span style='color:#484f58;font-size:0.72rem'>Simulación activa — parámetros bloqueados</span>",
@@ -347,7 +434,7 @@ def renderizar_sidebar():
         velocidad_nominal = col_vnom.number_input("Vel. nominal (m/min)", 0.5, 10.0, 3.0, 0.5, disabled=bloqueado, key="k_vnom")
         longitud_campo = col_campo.number_input("Campo total (m)", 100, 5000,  800,  50, disabled=bloqueado, key="k_campo")
 
-        st.markdown("##### Panel speed")
+        _seccion("Panel speed")
         velocidad_porcentaje = st.slider(
             "Panel speed  (Duty cycle %)", 1, 100, 50,
             key="k_vpct", format="%d %%",
@@ -355,18 +442,28 @@ def renderizar_sidebar():
         )
         velocidad_media = velocidad_porcentaje / 100 * velocidad_nominal
         st.markdown(
-            f"<div style='background:#161b22;border:1px solid #30363d;border-radius:8px;"
-            f"padding:8px 12px;margin:2px 0 10px 0;display:flex;justify-content:space-between'>"
-            f"<span><span style='color:#8b949e;font-size:0.7rem'>ON </span>"
-            f"<b style='color:#e6edf3;font-family:monospace'>{velocidad_porcentaje * 60 / 100:.0f} s</b>"
-            f"<span style='color:#8b949e;font-size:0.7rem'> / 60 s</span></span>"
-            f"<span><span style='color:#8b949e;font-size:0.7rem'>MEDIA </span>"
-            f"<b style='color:#3fb950;font-family:monospace'>{velocidad_media:.2f} m/min</b></span>"
+            f"<div style='background:#161b22;border:1px solid #30363d;border-radius:10px;"
+            f"padding:12px 16px;margin:4px 0 10px 0;"
+            f"display:grid;grid-template-columns:1fr 1fr;gap:4px'>"
+            f"<div>"
+            f"<div style='color:#8b949e;font-size:0.72rem;letter-spacing:1.5px;"
+            f"text-transform:uppercase;font-family:monospace;margin-bottom:4px'>Tiempo ON</div>"
+            f"<div style='color:#e6edf3;font-size:1.1rem;font-weight:700;font-family:monospace;line-height:1'>"
+            f"{velocidad_porcentaje * 60 / 100:.0f}"
+            f"<span style='color:#8b949e;font-size:0.82rem;font-weight:400'> s / 60 s</span></div>"
+            f"</div>"
+            f"<div>"
+            f"<div style='color:#8b949e;font-size:0.72rem;letter-spacing:1.5px;"
+            f"text-transform:uppercase;font-family:monospace;margin-bottom:4px'>Vel. media</div>"
+            f"<div style='color:#3fb950;font-size:1.1rem;font-weight:700;font-family:monospace;line-height:1'>"
+            f"{velocidad_media:.2f}"
+            f"<span style='color:#8b949e;font-size:0.82rem;font-weight:400'> m/min</span></div>"
+            f"</div>"
             f"</div>",
             unsafe_allow_html=True,
         )
 
-        st.markdown("##### Simulación")
+        _seccion("Simulación")
         segundos_por_refresco = st.slider(
             "Factor de escala temporal",
             1, 600, 60, key="k_simspd", format="x%d",
@@ -375,7 +472,7 @@ def renderizar_sidebar():
         st.caption(f"Cada refresco = **{segundos_por_refresco} s** simulados")
 
         st.divider()
-        st.markdown("##### Terreno")
+        _seccion("Terreno")
         terreno = st.selectbox(
             "Tipo de patinaje",
             options=list(TERRENOS.keys()), index=2,
@@ -394,7 +491,7 @@ def renderizar_sidebar():
             st.caption(f"Deriva acumulada estimada al final del campo: **±{deriva_estimada_cm:.0f} cm**")
 
         st.divider()
-        st.markdown("##### Auto-reverse")
+        _seccion("Auto-reverse")
         auto_reverse_activo = st.toggle(
             "Activar auto-reverse", key="k_auto_reverse",
             help="El lineal rebota automáticamente entre los límites configurados.",
@@ -410,7 +507,7 @@ def renderizar_sidebar():
             )
 
         st.divider()
-        st.markdown("##### Conexión externa")
+        _seccion("Conexión externa")
         st.radio(
             "Modo de conexión",
             options=["ninguno", "caja"],
@@ -429,7 +526,7 @@ def renderizar_sidebar():
 
         if modo_conexion == "caja":
             st.divider()
-            st.markdown("##### Ruido de posición simulado")
+            _seccion("Ruido de posición simulado")
             interferencia = st.slider(
                 "Desvío aleatorio por emisión (mm)",
                 min_value=0, max_value=15, value=0, step=1,
@@ -442,7 +539,7 @@ def renderizar_sidebar():
             )
 
         st.divider()
-        st.markdown("##### Trayectoria objetivo GPS")
+        _seccion("Trayectoria objetivo GPS")
         st.toggle("Activar trayectoria", key="k_tray_activa", help="Define puntos de guiado para la sección GPS. Se calcula error de distancia y rumbo.")
         _renderizar_seccion_trayectoria(bloqueado)
 
@@ -476,6 +573,7 @@ def renderizar_sidebar():
                 sim.lineal.start()
                 if sim.lineal.caja_interfaz:
                     sim.lineal.caja_interfaz.iniciar()
+                sim.estado_previo_caja = {"cart": False, "end": False, "safety": True, "gps": True}
                 sim.registro.append({"t": sim.lineal._tiempo_formateado(), "tipo": "START", "msg": f"Sistema reanudado desde {sim.lineal.posicion_norte:.2f} m"})
                 sim.en_marcha = True
                 sim.pausado = False
@@ -495,7 +593,4 @@ def renderizar_sidebar():
                 _limpiar_y_resetear()
                 st.rerun()
 
-        st.divider()
-        st.markdown("##### Teclado (simulación activa)")
-        _renderizar_referencia_teclado(activo=True)
         st.divider()

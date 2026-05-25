@@ -341,13 +341,19 @@ class CajaInterfaz:
             print("Pyserial no instalado; ejecuta: pip install pyserial")
             return
         if self._hilo is not None and self._hilo.is_alive():
-            return
+            if not self._activo:
+                # hilo muriendo: espera a que cierre los puertos antes de relanzar
+                self._hilo.join(timeout=0.5)
+            else:
+                return
         self._activo = True
         self._hilo = threading.Thread(target=self._bucle, daemon=True)
         self._hilo.start()
 
     def detener(self):
         self._activo = False
+        self.slow_down_cart = False
+        self.slow_down_end_tower = False
 
     def _bucle(self):
         try:

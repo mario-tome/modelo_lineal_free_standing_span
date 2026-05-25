@@ -285,27 +285,6 @@ def _get_tramo_gps(lineal: Lineal) -> tuple[AntenaGPS | None, int]:
 
 # BLOQUES HTML REUTILIZABLES
 
-def _html_badge_en_marcha(en_marcha_atras: bool, auto_reverse_activo: bool, numero_inversiones: int) -> str:
-    color = "#ff7b72" if en_marcha_atras else "#3fb950"
-    fondo = "rgba(255,123,114,0.08)" if en_marcha_atras else "rgba(63,185,80,0.08)"
-    borde = "rgba(255,123,114,0.25)" if en_marcha_atras else "rgba(63,185,80,0.25)"
-    texto = "&#9660; MARCHA ATRÁS" if en_marcha_atras else "&#9650; EN MARCHA"
-    sufijo = (
-        f"&nbsp;<span style='color:#8b949e;font-weight:400;font-size:0.75rem;letter-spacing:1px'>"
-        f"AUTO-REVERSE · {numero_inversiones} inv.</span>"
-        if auto_reverse_activo else ""
-    )
-    return (
-        f"<div style='display:inline-flex;align-items:center;gap:8px;"
-        f"background:{fondo};border:1px solid {borde};"
-        f"border-radius:20px;padding:5px 14px;margin:4px 0'>"
-        f"<span style='width:8px;height:8px;border-radius:50%;background:{color};"
-        f"display:inline-block;box-shadow:0 0 6px {color}'></span>"
-        f"<span style='color:{color};font-weight:600;letter-spacing:2px;font-size:0.85rem'>"
-        f"{texto}</span>{sufijo}</div>"
-    )
-
-
 def _html_barra_progreso_auto_reverse(
     lineal: Lineal, limite_sur: float, limite_norte: float, numero_inversiones: int
 ) -> str:
@@ -319,7 +298,7 @@ def _html_barra_progreso_auto_reverse(
         f"padding:14px 20px 10px 20px;margin:8px 0 16px 0;"
         f"height:130px;box-sizing:border-box'>"
         f"<div style='display:flex;justify-content:space-between;align-items:baseline;margin-bottom:10px'>"
-        f"<span style='color:#8b949e;font-size:0.72rem;letter-spacing:2px;text-transform:uppercase;font-family:monospace'>"
+        f"<span style='color:#e6edf3;font-size:0.88rem;letter-spacing:2px;text-transform:uppercase;font-family:monospace;font-weight:600'>"
         f"Auto-reverse  ·  {limite_sur:.0f} m — {limite_norte:.0f} m</span>"
         f"<span style='color:{color_barra};font-size:1.5rem;font-weight:700;font-family:monospace;line-height:1'>"
         f"{simbolo}&nbsp;{lineal.posicion_norte:.1f}<span style='color:#8b949e;font-size:0.9rem'> m</span></span>"
@@ -330,8 +309,8 @@ def _html_barra_progreso_auto_reverse(
         f"border-radius:50%;background:{color_barra};box-shadow:0 0 6px {color_barra}'></div>"
         f"</div>"
         f"<div style='display:flex;justify-content:space-between'>"
-        f"<span style='color:{color_barra};font-size:0.82rem;font-weight:600;font-family:monospace'>{numero_inversiones} inversiones</span>"
-        f"<span style='color:#484f58;font-size:0.82rem;font-family:monospace'>rango {amplitud:.0f} m</span>"
+        f"<span style='color:#e6edf3;font-size:0.88rem;font-weight:600;font-family:monospace'>{numero_inversiones} inversiones</span>"
+        f"<span style='color:#e6edf3;font-size:0.88rem;font-family:monospace'>rango {amplitud:.0f} m</span>"
         f"</div></div>"
     )
 
@@ -343,7 +322,7 @@ def _html_barra_progreso_lineal(posicion_norte: float, longitud_campo: float) ->
         f"padding:14px 20px 10px 20px;margin:8px 0 16px 0;"
         f"height:130px;box-sizing:border-box'>"
         f"<div style='display:flex;justify-content:space-between;align-items:baseline;margin-bottom:10px'>"
-        f"<span style='color:#8b949e;font-size:0.72rem;letter-spacing:2px;text-transform:uppercase;font-family:monospace'>Recorrido del campo</span>"
+        f"<span style='color:#e6edf3;font-size:0.88rem;letter-spacing:2px;text-transform:uppercase;font-family:monospace;font-weight:600'>Recorrido del campo</span>"
         f"<span style='color:#e6edf3;font-size:1.5rem;font-weight:700;font-family:monospace;line-height:1'>"
         f"{porcentaje:.1f}<span style='color:#8b949e;font-size:0.9rem'>%</span></span>"
         f"</div>"
@@ -351,8 +330,8 @@ def _html_barra_progreso_lineal(posicion_norte: float, longitud_campo: float) ->
         f"<div style='background:linear-gradient(90deg,#238636 0%,#3fb950 100%);width:{porcentaje:.2f}%;height:100%;border-radius:4px'></div>"
         f"</div>"
         f"<div style='display:flex;justify-content:space-between'>"
-        f"<span style='color:#3fb950;font-size:0.82rem;font-weight:600;font-family:monospace'>{posicion_norte:.1f} m avanzados</span>"
-        f"<span style='color:#484f58;font-size:0.82rem;font-family:monospace'>meta {longitud_campo:.0f} m</span>"
+        f"<span style='color:#e6edf3;font-size:0.88rem;font-weight:600;font-family:monospace'>{posicion_norte:.1f} m avanzados</span>"
+        f"<span style='color:#e6edf3;font-size:0.88rem;font-family:monospace'>meta {longitud_campo:.0f} m</span>"
         f"</div></div>"
     )
 
@@ -377,7 +356,7 @@ def _html_registro(registro: list) -> str:
     filas = "".join(
         f"<div style='padding:4px 0;border-bottom:1px solid #21262d;white-space:nowrap;"
         f"overflow:hidden;text-overflow:ellipsis'>"
-        f"<code style='color:#484f58;font-size:0.78rem'>{e['t']}</code>&nbsp;"
+        f"<code style='color:#e6edf3;font-size:0.78rem'>{e['t']}</code>&nbsp;"
         f"<span style='background:{_COLORES_REGISTRO.get(e['tipo'], '#8b949e')}22;"
         f"color:{_COLORES_REGISTRO.get(e['tipo'], '#8b949e')};"
         f"border-radius:3px;padding:1px 6px;font-size:0.74rem;font-family:monospace;font-weight:700'>"
@@ -392,9 +371,9 @@ def _html_registro(registro: list) -> str:
         f"padding:14px 20px 10px 20px;margin:8px 0 16px 0;"
         f"height:130px;box-sizing:border-box'>"
         f"<div style='display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px'>"
-        f"<span style='color:#8b949e;font-size:0.72rem;letter-spacing:2px;"
-        f"text-transform:uppercase;font-family:monospace'>Registro</span>"
-        f"<span style='color:#484f58;font-size:0.78rem;font-family:monospace'>{pie}</span>"
+        f"<span style='color:#e6edf3;font-size:0.88rem;letter-spacing:2px;"
+        f"text-transform:uppercase;font-family:monospace;font-weight:600'>Logs</span>"
+        f"<span style='color:#e6edf3;font-size:0.82rem;font-family:monospace'>{pie}</span>"
         f"</div>"
         f"<div style='height:80px;overflow-y:auto'>"
         f"{filas}"
@@ -426,66 +405,30 @@ def panel_principal():
         _avanzar_simulacion(sim)
         lineal = sim.lineal
 
-    st.markdown("# Gemelo Digital — Lineal FSS")
+    st.markdown(
+        "<h1 style='font-size:2rem;margin:0 0 6px 0'>GEMELO DIGITAL "
+        "<span style='color:#3fb950'>LINEAL FSS</span></h1>",
+        unsafe_allow_html=True,
+    )
 
     # Insignia de estado
-    if not es_operador and sim.lineal is not None:
-        st.markdown(
-            "<div style='display:inline-flex;align-items:center;gap:8px;"
-            "background:rgba(88,166,255,0.08);border:1px solid rgba(88,166,255,0.25);"
-            "border-radius:20px;padding:5px 14px;margin:4px 0'>"
-            "<span style='width:8px;height:8px;border-radius:50%;background:#58a6ff;"
-            "display:inline-block'></span>"
-            "<span style='color:#58a6ff;font-weight:600;letter-spacing:1px;"
-            "font-size:0.85rem'>MODO OBSERVADOR — solo lectura</span>"
-            "</div>",
-            unsafe_allow_html=True,
-        )
-
-    if sim.completado:
-        st.markdown(
-            f"<div style='display:inline-flex;align-items:center;gap:10px;"
-            f"background:rgba(63,185,80,0.08);border:1px solid rgba(63,185,80,0.25);"
-            f"border-radius:20px;padding:6px 16px;margin:4px 0'>"
-            f"<span style='color:#3fb950;font-size:1rem'>✓</span>"
-            f"<span style='color:#3fb950;font-weight:600;letter-spacing:1px;font-size:0.85rem'>RIEGO COMPLETADO</span>"
-            f"<span style='color:#8b949e;font-size:0.8rem'>"
-            f"· {lineal._tiempo_formateado()} · {lineal.ciclo_actual} ciclos · {lineal.posicion_norte:.1f} m</span>"
-            f"</div>",
-            unsafe_allow_html=True,
-        )
-    elif sim.en_marcha:
-        st.markdown(
-            _html_badge_en_marcha(
-                lineal is not None and lineal.en_marcha_atras,
-                sim.auto_reverse_activo,
-                sim.numero_inversiones,
-            ),
-            unsafe_allow_html=True,
-        )
-    elif sim.pausado:
-        st.markdown(
-            "<div style='display:inline-flex;align-items:center;gap:8px;"
-            "background:rgba(227,179,65,0.08);border:1px solid rgba(227,179,65,0.25);"
-            "border-radius:20px;padding:5px 14px;margin:4px 0'>"
-            "<span style='width:8px;height:8px;border-radius:50%;background:#e3b341;"
-            "display:inline-block'></span>"
-            "<span style='color:#e3b341;font-weight:600;letter-spacing:2px;font-size:0.85rem'>PAUSADO</span>"
-            "</div>",
-            unsafe_allow_html=True,
-        )
-    else:
-        st.markdown(
-            "<div style='display:inline-flex;align-items:center;gap:8px;"
-            "background:rgba(139,148,158,0.06);border:1px solid #21262d;"
-            "border-radius:20px;padding:5px 14px;margin:4px 0'>"
-            "<span style='width:8px;height:8px;border-radius:50%;background:#484f58;"
-            "display:inline-block'></span>"
-            "<span style='color:#8b949e;letter-spacing:1px;font-size:0.85rem'>"
-            "Configura el lineal en el panel izquierdo y pulsa INICIAR</span>"
-            "</div>",
-            unsafe_allow_html=True,
-        )
+    # Barra de progreso + Logs (lado a lado, misma altura) — visión de estado inmediata
+    if lineal:
+        col_progreso, col_registro = st.columns([7, 3])
+        with col_progreso:
+            if sim.auto_reverse_activo:
+                st.markdown(
+                    _html_barra_progreso_auto_reverse(lineal, sim.limite_sur, sim.limite_norte, sim.numero_inversiones),
+                    unsafe_allow_html=True,
+                )
+            else:
+                st.markdown(
+                    _html_barra_progreso_lineal(lineal.posicion_norte, longitud_campo),
+                    unsafe_allow_html=True,
+                )
+        with col_registro:
+            if sim.registro:
+                st.markdown(_html_registro(sim.registro), unsafe_allow_html=True)
 
     # Métricas principales
     columnas_metricas = st.columns(10)
@@ -515,25 +458,7 @@ def panel_principal():
         for columna in columnas_metricas:
             columna.metric("—", "—")
 
-    # Barra de progreso + Registro de eventos (lado a lado, misma altura)
-    if lineal:
-        col_progreso, col_registro = st.columns([7, 3])
-        with col_progreso:
-            if sim.auto_reverse_activo:
-                st.markdown(
-                    _html_barra_progreso_auto_reverse(lineal, sim.limite_sur, sim.limite_norte, sim.numero_inversiones),
-                    unsafe_allow_html=True,
-                )
-            else:
-                st.markdown(
-                    _html_barra_progreso_lineal(lineal.posicion_norte, longitud_campo),
-                    unsafe_allow_html=True,
-                )
-        with col_registro:
-            if sim.registro:
-                st.markdown(_html_registro(sim.registro), unsafe_allow_html=True)
-
-    # Métricas caja de interfaz GPS
+    # Métricas caja de interfaz GPS (se añaden al bloque de detalle cuando hay conexión)
     if lineal and lineal.caja_interfaz:
         caja = lineal.caja_interfaz
         color_safety = "#3fb950" if caja.safety_ok else "#f85149"
